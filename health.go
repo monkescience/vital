@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"runtime"
 	"sync"
 	"time"
 )
@@ -19,18 +18,15 @@ const (
 )
 
 type LiveResponse struct {
-	Status      Status `json:"status"`
-	Version     string `json:"version"`
-	Uptime      string `json:"uptime"`
-	GoVersion   string `json:"go_version"`
-	Host        string `json:"host"`
-	Environment string `json:"environment"`
+	Status Status `json:"status"`
 }
 
-// ReadyResponse represents the readiness check response
 type ReadyResponse struct {
-	Status Status          `json:"status"`
-	Checks []CheckResponse `json:"checks"`
+	Status      Status          `json:"status"`
+	Checks      []CheckResponse `json:"checks"`
+	Version     string          `json:"version,omitempty"`
+	Host        string          `json:"host,omitempty"`
+	Environment string          `json:"environment,omitempty"`
 }
 
 type CheckResponse struct {
@@ -50,6 +46,39 @@ type readyConfig struct {
 	perCheckTimeout time.Duration
 }
 
+func runCheck(ctx context.Context, cfg readyConfig, chk Checker) CheckResponse {
+	start := time.Now()
+
+	cctx := ctx
+
+	if cfg.perCheckTimeout > 0 {
+		var cancel context.CancelFunc
+
+		cctx, cancel = context.WithTimeout(ctx, cfg.perCheckTimeout)
+		defer cancel()
+	}
+
+	status, msg := chk.Check(cctx)
+
+	err := cctx.Err()
+	if err != nil && status == StatusOK {
+		status = StatusError
+
+		if msg == "" {
+			msg = err.Error()
+		} else {
+			msg = msg + "; " + err.Error()
+		}
+	}
+
+	return CheckResponse{
+		Name:     chk.Name(),
+		Status:   status,
+		Message:  msg,
+		Duration: time.Since(start).String(),
+	}
+}
+
 type ReadyOption func(*readyConfig)
 
 func WithOverallReadyTimeout(d time.Duration) ReadyOption {
@@ -66,32 +95,25 @@ func NewHandler(version string, environment string, checkers []Checker, opts ...
 		host = "unknown"
 	}
 
-	startTime := time.Now()
-
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health/live", LiveHandlerFunc(version, startTime, host, environment))
-	mux.HandleFunc("GET /health/ready", ReadyHandlerFunc(checkers, opts...))
+
+	mux.HandleFunc("GET /health/live", LiveHandlerFunc())
+	mux.HandleFunc("GET /health/ready", ReadyHandlerFunc(version, host, environment, checkers, opts...))
 
 	return mux
 }
 
-// LiveHandlerFunc handles liveness check requests
-func LiveHandlerFunc(version string, startTime time.Time, host string, environment string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		response := LiveResponse{
-			Status:      StatusOK,
-			Version:     version,
-			Uptime:      time.Since(startTime).String(),
-			GoVersion:   runtime.Version(),
-			Host:        host,
-			Environment: environment,
-		}
+func LiveHandlerFunc() http.HandlerFunc {
+	return func(writer http.ResponseWriter, req *http.Request) {
+		ctx := req.Context()
 
-		disableResponseCacheHeaders(w)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		err := json.NewEncoder(w).Encode(response)
+		response := LiveResponse{Status: StatusOK}
+
+		disableResponseCacheHeaders(writer)
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusOK)
+
+		err := json.NewEncoder(writer).Encode(response)
 		if err != nil {
 			slog.ErrorContext(
 				ctx,
@@ -105,96 +127,127 @@ func LiveHandlerFunc(version string, startTime time.Time, host string, environme
 	}
 }
 
-// ReadyHandlerFunc handles readiness check requests with context and timeouts
-func ReadyHandlerFunc(checkers []Checker, opts ...ReadyOption) http.HandlerFunc {
+func ReadyHandlerFunc(
+	version string,
+	host string,
+	environment string,
+	checkers []Checker,
+	opts ...ReadyOption,
+) http.HandlerFunc {
+	const (
+		defaultOverallTimeout  = 2 * time.Second
+		defaultPerCheckTimeout = 800 * time.Millisecond
+	)
+
 	cfg := readyConfig{
-		overallTimeout:  2 * time.Second,
-		perCheckTimeout: 800 * time.Millisecond,
+		overallTimeout:  defaultOverallTimeout,
+		perCheckTimeout: defaultPerCheckTimeout,
 	}
+
 	for _, o := range opts {
 		o(&cfg)
 	}
 
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		if cfg.overallTimeout > 0 {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, cfg.overallTimeout)
-			defer cancel()
-		}
-
-		response := ReadyResponse{
-			Status: StatusOK,
-			Checks: make([]CheckResponse, len(checkers)),
-		}
-
-		var wg sync.WaitGroup
-		wg.Add(len(checkers))
-
-		for idx, checker := range checkers {
-			i, c := idx, checker
-			go func() {
-				defer wg.Done()
-				start := time.Now()
-				cctx := ctx
-				if cfg.perCheckTimeout > 0 {
-					var ccancel context.CancelFunc
-					cctx, ccancel = context.WithTimeout(ctx, cfg.perCheckTimeout)
-					defer ccancel()
-				}
-
-				status, msg := c.Check(cctx)
-				if err := cctx.Err(); err != nil && status == StatusOK {
-					status = StatusError
-					if msg == "" {
-						msg = err.Error()
-					} else {
-						msg = msg + "; " + err.Error()
-					}
-				}
-
-				response.Checks[i] = CheckResponse{
-					Name:     c.Name(),
-					Status:   status,
-					Message:  msg,
-					Duration: time.Since(start).String(),
-				}
-			}()
-		}
-
-		wg.Wait()
-
-		for _, check := range response.Checks {
-			if check.Status != StatusOK {
-				response.Status = StatusError
-				break
-			}
-		}
-
-		disableResponseCacheHeaders(w)
-		w.Header().Set("Content-Type", "application/json")
-		statusCode := http.StatusOK
-		if response.Status != StatusOK {
-			statusCode = http.StatusServiceUnavailable
-		}
-		w.WriteHeader(statusCode)
-
-		err := json.NewEncoder(w).Encode(response)
-		if err != nil {
-			slog.ErrorContext(
-				ctx,
-				"failed to encode ready health response",
-				slog.String("handler", "ready"),
-				slog.String("route", "/health/ready"),
-				slog.Int("status", statusCode),
-				slog.Any("error", err),
-			)
-		}
+	return func(writer http.ResponseWriter, req *http.Request) {
+		readyHandler(writer, req, cfg, version, host, environment, checkers)
 	}
 }
 
-func disableResponseCacheHeaders(w http.ResponseWriter) {
-	w.Header().Set("Cache-Control", "no-store, no-cache")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Expires", "Thu, 01 Jan 1970 00:00:00 GMT")
+func readyHandler(
+	writer http.ResponseWriter,
+	req *http.Request,
+	cfg readyConfig,
+	version, host, environment string,
+	checkers []Checker,
+) {
+	ctx := req.Context()
+
+	ctx, cancel := contextWithTimeoutIfNeeded(ctx, cfg.overallTimeout)
+	if cancel != nil {
+		defer cancel()
+	}
+
+	checks := runAllChecks(ctx, cfg, checkers)
+
+	response := ReadyResponse{
+		Status:      StatusOK,
+		Checks:      checks,
+		Version:     version,
+		Host:        host,
+		Environment: environment,
+	}
+
+	response.Status = overallStatus(checks)
+
+	disableResponseCacheHeaders(writer)
+	writer.Header().Set("Content-Type", "application/json")
+
+	statusCode := http.StatusOK
+	if response.Status != StatusOK {
+		statusCode = http.StatusServiceUnavailable
+	}
+
+	writer.WriteHeader(statusCode)
+
+	respondJSON(ctx, writer, statusCode, response, "ready", "/health/ready")
+}
+
+func contextWithTimeoutIfNeeded(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	if d <= 0 {
+		return ctx, nil
+	}
+
+	return context.WithTimeout(ctx, d)
+}
+
+func runAllChecks(ctx context.Context, cfg readyConfig, checkers []Checker) []CheckResponse {
+	responses := make([]CheckResponse, len(checkers))
+
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(len(checkers))
+
+	for idx, checker := range checkers {
+		checkerIndex, chk := idx, checker
+
+		go func() {
+			defer waitGroup.Done()
+
+			responses[checkerIndex] = runCheck(ctx, cfg, chk)
+		}()
+	}
+
+	waitGroup.Wait()
+
+	return responses
+}
+
+func overallStatus(checks []CheckResponse) Status {
+	for _, c := range checks {
+		if c.Status != StatusOK {
+			return StatusError
+		}
+	}
+
+	return StatusOK
+}
+
+func respondJSON(ctx context.Context, writer http.ResponseWriter, statusCode int, payload any, handler, route string) {
+	err := json.NewEncoder(writer).Encode(payload)
+	if err != nil {
+		slog.ErrorContext(
+			ctx,
+			"failed to encode "+handler+" health response",
+			slog.String("handler", handler),
+			slog.String("route", route),
+			slog.Int("status", statusCode),
+			slog.Any("error", err),
+		)
+	}
+}
+
+// disableResponseCacheHeaders sets headers to prevent caching of health responses.
+func disableResponseCacheHeaders(writer http.ResponseWriter) {
+	writer.Header().Set("Cache-Control", "no-store, no-cache")
+	writer.Header().Set("Pragma", "no-cache")
+	writer.Header().Set("Expires", "Thu, 01 Jan 1970 00:00:00 GMT")
 }
