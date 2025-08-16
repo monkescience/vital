@@ -13,11 +13,16 @@ func Test(t *testing.T) {
 
 	t.Run("health live ok", func(t *testing.T) {
 		t.Parallel()
+
 		// given
 		version := "1.2.3"
 		environment := "eu-central-1-dev"
 
-		handlers := vitals.NewHandler(version, environment, []vitals.Checker{})
+		handlers := vitals.NewHandler(
+			vitals.WithVersion(version),
+			vitals.WithEnvironment(environment),
+			vitals.WithCheckers(),
+		)
 		responseRecorder := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/health/live", nil)
 

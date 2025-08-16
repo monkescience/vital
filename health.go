@@ -42,25 +42,15 @@ type Checker interface {
 }
 
 type readyConfig struct {
-	overallTimeout  time.Duration
-	perCheckTimeout time.Duration
+	overallTimeout time.Duration
 }
 
 func runCheck(ctx context.Context, cfg readyConfig, chk Checker) CheckResponse {
 	start := time.Now()
 
-	cctx := ctx
+	status, msg := chk.Check(ctx)
 
-	if cfg.perCheckTimeout > 0 {
-		var cancel context.CancelFunc
-
-		cctx, cancel = context.WithTimeout(ctx, cfg.perCheckTimeout)
-		defer cancel()
-	}
-
-	status, msg := chk.Check(cctx)
-
-	err := cctx.Err()
+	err := ctx.Err()
 	if err != nil && status == StatusOK {
 		status = StatusError
 
@@ -85,16 +75,37 @@ func WithOverallReadyTimeout(d time.Duration) ReadyOption {
 	return func(c *readyConfig) { c.overallTimeout = d }
 }
 
-func WithPerCheckTimeout(d time.Duration) ReadyOption {
-	return func(c *readyConfig) { c.perCheckTimeout = d }
+type handlerConfig struct {
+	version     string
+	environment string
+	checkers    []Checker
+	readyOpts   []ReadyOption
 }
 
-func NewHandler(
-	version string,
-	environment string,
-	checkers []Checker,
-	opts ...ReadyOption,
-) http.Handler {
+type HandlerOption func(*handlerConfig)
+
+func WithVersion(v string) HandlerOption {
+	return func(c *handlerConfig) { c.version = v }
+}
+
+func WithEnvironment(env string) HandlerOption {
+	return func(c *handlerConfig) { c.environment = env }
+}
+
+func WithCheckers(checkers ...Checker) HandlerOption {
+	return func(c *handlerConfig) { c.checkers = append(c.checkers, checkers...) }
+}
+
+func WithReadyOptions(opts ...ReadyOption) HandlerOption {
+	return func(c *handlerConfig) { c.readyOpts = append(c.readyOpts, opts...) }
+}
+
+func NewHandler(opts ...HandlerOption) http.Handler {
+	hc := handlerConfig{}
+	for _, o := range opts {
+		o(&hc)
+	}
+
 	host, err := os.Hostname()
 	if err != nil {
 		host = "unknown"
@@ -105,7 +116,7 @@ func NewHandler(
 	mux.HandleFunc("GET /health/live", LiveHandlerFunc())
 	mux.HandleFunc(
 		"GET /health/ready",
-		ReadyHandlerFunc(version, host, environment, checkers, opts...),
+		ReadyHandlerFunc(hc.version, host, hc.environment, hc.checkers, hc.readyOpts...),
 	)
 
 	return mux
@@ -143,13 +154,11 @@ func ReadyHandlerFunc(
 	opts ...ReadyOption,
 ) http.HandlerFunc {
 	const (
-		defaultOverallTimeout  = 2 * time.Second
-		defaultPerCheckTimeout = 800 * time.Millisecond
+		defaultOverallTimeout = 2 * time.Second
 	)
 
 	cfg := readyConfig{
-		overallTimeout:  defaultOverallTimeout,
-		perCheckTimeout: defaultPerCheckTimeout,
+		overallTimeout: defaultOverallTimeout,
 	}
 
 	for _, o := range opts {
