@@ -26,7 +26,11 @@ func Test(t *testing.T) {
 
 		// then
 		if responseRecorder.Code != http.StatusOK {
-			t.Errorf("handler returned wrong status code: got %v want %v", responseRecorder.Code, http.StatusOK)
+			t.Errorf(
+				"handler returned wrong status code: got %v want %v",
+				responseRecorder.Code,
+				http.StatusOK,
+			)
 		}
 	})
 }

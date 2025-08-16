@@ -109,3 +109,12 @@ linters:
     - wrapcheck
     - wsl_v5
     - zerologlint
+
+formatters:
+  enable:
+    - gci
+    # - gofmt
+    - gofumpt
+    - goimports
+    - golines
+    # - swaggo

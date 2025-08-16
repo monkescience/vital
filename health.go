@@ -89,7 +89,12 @@ func WithPerCheckTimeout(d time.Duration) ReadyOption {
 	return func(c *readyConfig) { c.perCheckTimeout = d }
 }
 
-func NewHandler(version string, environment string, checkers []Checker, opts ...ReadyOption) http.Handler {
+func NewHandler(
+	version string,
+	environment string,
+	checkers []Checker,
+	opts ...ReadyOption,
+) http.Handler {
 	host, err := os.Hostname()
 	if err != nil {
 		host = "unknown"
@@ -98,7 +103,10 @@ func NewHandler(version string, environment string, checkers []Checker, opts ...
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health/live", LiveHandlerFunc())
-	mux.HandleFunc("GET /health/ready", ReadyHandlerFunc(version, host, environment, checkers, opts...))
+	mux.HandleFunc(
+		"GET /health/ready",
+		ReadyHandlerFunc(version, host, environment, checkers, opts...),
+	)
 
 	return mux
 }
@@ -192,7 +200,10 @@ func readyHandler(
 	respondJSON(ctx, writer, statusCode, response, "ready", "/health/ready")
 }
 
-func contextWithTimeoutIfNeeded(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+func contextWithTimeoutIfNeeded(
+	ctx context.Context,
+	d time.Duration,
+) (context.Context, context.CancelFunc) {
 	if d <= 0 {
 		return ctx, nil
 	}
@@ -231,7 +242,13 @@ func overallStatus(checks []CheckResponse) Status {
 	return StatusOK
 }
 
-func respondJSON(ctx context.Context, writer http.ResponseWriter, statusCode int, payload any, handler, route string) {
+func respondJSON(
+	ctx context.Context,
+	writer http.ResponseWriter,
+	statusCode int,
+	payload any,
+	handler, route string,
+) {
 	err := json.NewEncoder(writer).Encode(payload)
 	if err != nil {
 		slog.ErrorContext(
