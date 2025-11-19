@@ -256,6 +256,8 @@ func respondJSON(
 	payload any,
 	handler, route string,
 ) {
+	writer.Header().Set("Content-Type", "application/json")
+	writer.WriteHeader(statusCode)
 	err := json.NewEncoder(writer).Encode(payload)
 	if err != nil {
 		slog.ErrorContext(
