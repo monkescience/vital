@@ -372,7 +372,11 @@ func Test(t *testing.T) {
 		}
 
 		if response.Status != vitals.StatusError {
-			t.Errorf("expected status %v due to timeout, got %v", vitals.StatusError, response.Status)
+			t.Errorf(
+				"expected status %v due to timeout, got %v",
+				vitals.StatusError,
+				response.Status,
+			)
 		}
 
 		if len(response.Checks) != 1 {
