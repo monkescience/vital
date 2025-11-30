@@ -4,6 +4,15 @@ run:
   tests: false
 
 linters:
+  settings:
+    tagliatelle:
+      case:
+        rules:
+          json: snake
+          yaml: snake
+          xml: snake
+          bson: snake
+
   default: none
   enable:
     - arangolint

@@ -362,3 +362,314 @@ func TestContextHandler_DifferentValueTypes(t *testing.T) {
 		t.Error("expected bool_val to be in log output")
 	}
 }
+
+func TestNewHandlerFromConfig(t *testing.T) {
+	t.Run("returns error with empty log level", func(t *testing.T) {
+		// GIVEN: a config with empty level
+		cfg := LogConfig{
+			Level:  "",
+			Format: "json",
+		}
+
+		// WHEN: creating a handler from config
+		handler, err := NewHandlerFromConfig(cfg)
+
+		// THEN: it should return an error
+		if err == nil {
+			t.Error("expected error for empty log level")
+		}
+
+		if handler != nil {
+			t.Error("expected nil handler when error occurs")
+		}
+	})
+
+	t.Run("returns error with empty format", func(t *testing.T) {
+		// GIVEN: a config with empty format
+		cfg := LogConfig{
+			Level:  "info",
+			Format: "",
+		}
+
+		// WHEN: creating a handler from config
+		handler, err := NewHandlerFromConfig(cfg)
+
+		// THEN: it should return an error
+		if err == nil {
+			t.Error("expected error for empty format")
+		}
+
+		if handler != nil {
+			t.Error("expected nil handler when error occurs")
+		}
+	})
+
+	t.Run("creates handler with debug level", func(t *testing.T) {
+		// GIVEN: a config with debug level
+		cfg := LogConfig{
+			Level:  "debug",
+			Format: "json",
+		}
+
+		// WHEN: creating a handler from config
+		handler, err := NewHandlerFromConfig(cfg)
+		// THEN: it should succeed and debug level should be enabled
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !handler.Enabled(context.Background(), slog.LevelDebug) {
+			t.Error("expected debug level to be enabled")
+		}
+	})
+
+	t.Run("creates handler with info level", func(t *testing.T) {
+		// GIVEN: a config with info level
+		cfg := LogConfig{
+			Level:  "info",
+			Format: "json",
+		}
+
+		// WHEN: creating a handler from config
+		handler, err := NewHandlerFromConfig(cfg)
+		// THEN: it should succeed and info level should be enabled but debug should not
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !handler.Enabled(context.Background(), slog.LevelInfo) {
+			t.Error("expected info level to be enabled")
+		}
+
+		if handler.Enabled(context.Background(), slog.LevelDebug) {
+			t.Error("expected debug level to be disabled")
+		}
+	})
+
+	t.Run("creates handler with warn level", func(t *testing.T) {
+		// GIVEN: a config with warn level
+		cfg := LogConfig{
+			Level:  "warn",
+			Format: "json",
+		}
+
+		// WHEN: creating a handler from config
+		handler, err := NewHandlerFromConfig(cfg)
+		// THEN: it should succeed and warn and error should be enabled, info and debug should not
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !handler.Enabled(context.Background(), slog.LevelWarn) {
+			t.Error("expected warn level to be enabled")
+		}
+
+		if !handler.Enabled(context.Background(), slog.LevelError) {
+			t.Error("expected error level to be enabled")
+		}
+
+		if handler.Enabled(context.Background(), slog.LevelInfo) {
+			t.Error("expected info level to be disabled")
+		}
+	})
+
+	t.Run("creates handler with error level", func(t *testing.T) {
+		// GIVEN: a config with error level
+		cfg := LogConfig{
+			Level:  "error",
+			Format: "json",
+		}
+
+		// WHEN: creating a handler from config
+		handler, err := NewHandlerFromConfig(cfg)
+		// THEN: it should succeed and only error level should be enabled
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !handler.Enabled(context.Background(), slog.LevelError) {
+			t.Error("expected error level to be enabled")
+		}
+
+		if handler.Enabled(context.Background(), slog.LevelWarn) {
+			t.Error("expected warn level to be disabled")
+		}
+	})
+
+	t.Run("returns error with invalid log level", func(t *testing.T) {
+		// GIVEN: a config with invalid level
+		cfg := LogConfig{
+			Level:  "invalid",
+			Format: "json",
+		}
+
+		// WHEN: creating a handler from config
+		handler, err := NewHandlerFromConfig(cfg)
+
+		// THEN: it should return an error
+		if err == nil {
+			t.Error("expected error for invalid log level")
+		}
+
+		if handler != nil {
+			t.Error("expected nil handler when error occurs")
+		}
+	})
+
+	t.Run("creates handler with JSON format", func(t *testing.T) {
+		// GIVEN: a config with JSON format
+		cfg := LogConfig{
+			Level:  "info",
+			Format: "json",
+		}
+
+		// WHEN: creating a handler from config
+		handler, err := NewHandlerFromConfig(cfg)
+		// THEN: it should succeed and create a ContextHandler
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		_, ok := handler.(*ContextHandler)
+		if !ok {
+			t.Error("expected handler to be a ContextHandler")
+		}
+	})
+
+	t.Run("creates handler with text format", func(t *testing.T) {
+		// GIVEN: a config with text format
+		cfg := LogConfig{
+			Level:  "info",
+			Format: "text",
+		}
+
+		// WHEN: creating a handler from config
+		handler, err := NewHandlerFromConfig(cfg)
+		// THEN: it should succeed and create a ContextHandler
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		_, ok := handler.(*ContextHandler)
+		if !ok {
+			t.Error("expected handler to be a ContextHandler")
+		}
+	})
+
+	t.Run("returns error with invalid format", func(t *testing.T) {
+		// GIVEN: a config with invalid format
+		cfg := LogConfig{
+			Level:  "info",
+			Format: "invalid",
+		}
+
+		// WHEN: creating a handler from config
+		handler, err := NewHandlerFromConfig(cfg)
+
+		// THEN: it should return an error
+		if err == nil {
+			t.Error("expected error for invalid format")
+		}
+
+		if handler != nil {
+			t.Error("expected nil handler when error occurs")
+		}
+	})
+
+	t.Run("creates handler with AddSource enabled", func(t *testing.T) {
+		// GIVEN: a config with AddSource enabled
+		cfg := LogConfig{
+			Level:     "info",
+			Format:    "json",
+			AddSource: true,
+		}
+
+		// WHEN: creating a handler from config
+		handler, err := NewHandlerFromConfig(cfg)
+		// THEN: it should succeed and create a valid handler
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		_, ok := handler.(*ContextHandler)
+		if !ok {
+			t.Error("expected handler to be a ContextHandler")
+		}
+	})
+
+	t.Run("creates handler with context handler options", func(t *testing.T) {
+		// GIVEN: a config and context handler options
+		cfg := LogConfig{
+			Level:  "info",
+			Format: "json",
+		}
+
+		testKey := ContextKey{Name: "custom_key"}
+
+		// WHEN: creating a handler with custom options
+		handler, err := NewHandlerFromConfig(cfg, WithContextKeys(testKey))
+		// THEN: it should succeed and include the custom context keys
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		contextHandler, ok := handler.(*ContextHandler)
+		if !ok {
+			t.Fatal("expected handler to be a ContextHandler")
+		}
+
+		// Verify the key is registered
+		keys := contextHandler.registry.Keys()
+		found := false
+		for _, key := range keys {
+			if key.Name == testKey.Name {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			t.Error("expected custom_key to be registered")
+		}
+	})
+
+	t.Run("creates handler with builtin keys option", func(t *testing.T) {
+		// GIVEN: a config with builtin keys option
+		cfg := LogConfig{
+			Level:  "info",
+			Format: "json",
+		}
+
+		// WHEN: creating a handler with builtin keys
+		handler, err := NewHandlerFromConfig(cfg, WithBuiltinKeys())
+		// THEN: it should succeed and include builtin keys
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		contextHandler, ok := handler.(*ContextHandler)
+		if !ok {
+			t.Fatal("expected handler to be a ContextHandler")
+		}
+
+		// Verify builtin keys are registered
+		keys := contextHandler.registry.Keys()
+		expectedKeys := map[string]bool{
+			"trace_id":    false,
+			"span_id":     false,
+			"trace_flags": false,
+		}
+
+		for _, key := range keys {
+			if _, exists := expectedKeys[key.Name]; exists {
+				expectedKeys[key.Name] = true
+			}
+		}
+
+		for keyName, found := range expectedKeys {
+			if !found {
+				t.Errorf("expected builtin key %s to be registered", keyName)
+			}
+		}
+	})
+}

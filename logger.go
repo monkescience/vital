@@ -2,8 +2,10 @@ package vital
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 )
 
@@ -184,4 +186,59 @@ func (h *ContextHandler) WithGroup(name string) slog.Handler {
 		h.handler.WithGroup(name),
 		WithRegistry(h.registry),
 	)
+}
+
+var (
+	// ErrInvalidLogLevel is returned when an invalid log level is provided.
+	ErrInvalidLogLevel = errors.New("invalid log level")
+	// ErrInvalidLogFormat is returned when an invalid log format is provided.
+	ErrInvalidLogFormat = errors.New("invalid log format")
+)
+
+// LogConfig holds configuration for the logger.
+type LogConfig struct {
+	// Level is the log level (debug, info, warn, error).
+	Level string `json:"level" yaml:"level"`
+	// Format is the log format (json, text).
+	Format string `json:"format" yaml:"format"`
+	// AddSource includes the source file and line number in the log.
+	AddSource bool `json:"add_source" yaml:"add_source"`
+}
+
+// NewHandlerFromConfig creates a new slog.Handler based on the provided configuration.
+// Returns an error if level or format are invalid.
+func NewHandlerFromConfig(cfg LogConfig, opts ...ContextHandlerOption) (slog.Handler, error) {
+	var level slog.Level
+
+	switch cfg.Level {
+	case "debug":
+		level = slog.LevelDebug
+	case "info":
+		level = slog.LevelInfo
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		return nil, fmt.Errorf("%w: %q (must be debug, info, warn, or error)", ErrInvalidLogLevel, cfg.Level)
+	}
+
+	//nolint:exhaustruct // ReplaceAttr is optional and not needed for basic configuration
+	handlerOpts := &slog.HandlerOptions{
+		Level:     level,
+		AddSource: cfg.AddSource,
+	}
+
+	var handler slog.Handler
+
+	switch cfg.Format {
+	case "text":
+		handler = slog.NewTextHandler(os.Stdout, handlerOpts)
+	case "json":
+		handler = slog.NewJSONHandler(os.Stdout, handlerOpts)
+	default:
+		return nil, fmt.Errorf("%w: %q (must be text or json)", ErrInvalidLogFormat, cfg.Format)
+	}
+
+	return NewContextHandler(handler, opts...), nil
 }
