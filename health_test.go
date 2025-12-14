@@ -12,7 +12,7 @@ import (
 	"github.com/monkescience/vital"
 )
 
-// mockChecker is a test implementation of the Checker interface
+// mockChecker is a test implementation of the Checker interface.
 type mockChecker struct {
 	name    string
 	status  vital.Status
@@ -32,6 +32,7 @@ func (m *mockChecker) Check(ctx context.Context) (vital.Status, string) {
 			return vital.StatusError, "check timed out"
 		}
 	}
+
 	return m.status, m.message
 }
 
@@ -61,7 +62,9 @@ func TestLiveHandler_ReturnsOK(t *testing.T) {
 	}
 
 	var response vital.LiveResponse
-	if err := json.NewDecoder(responseRecorder.Body).Decode(&response); err != nil {
+
+	err := json.NewDecoder(responseRecorder.Body).Decode(&response)
+	if err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
@@ -99,7 +102,9 @@ func TestReadyHandler_NoCheckers(t *testing.T) {
 	}
 
 	var response vital.ReadyResponse
-	if err := json.NewDecoder(responseRecorder.Body).Decode(&response); err != nil {
+
+	err := json.NewDecoder(responseRecorder.Body).Decode(&response)
+	if err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
@@ -149,7 +154,9 @@ func TestReadyHandler_SuccessfulChecker(t *testing.T) {
 	}
 
 	var response vital.ReadyResponse
-	if err := json.NewDecoder(responseRecorder.Body).Decode(&response); err != nil {
+
+	err := json.NewDecoder(responseRecorder.Body).Decode(&response)
+	if err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
@@ -207,7 +214,9 @@ func TestReadyHandler_FailedChecker(t *testing.T) {
 	}
 
 	var response vital.ReadyResponse
-	if err := json.NewDecoder(responseRecorder.Body).Decode(&response); err != nil {
+
+	err := json.NewDecoder(responseRecorder.Body).Decode(&response)
+	if err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
@@ -257,7 +266,9 @@ func TestReadyHandler_MultipleCheckers(t *testing.T) {
 	}
 
 	var response vital.ReadyResponse
-	if err := json.NewDecoder(responseRecorder.Body).Decode(&response); err != nil {
+
+	err := json.NewDecoder(responseRecorder.Body).Decode(&response)
+	if err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
@@ -298,7 +309,9 @@ func TestReadyHandler_MixedCheckerResults(t *testing.T) {
 	}
 
 	var response vital.ReadyResponse
-	if err := json.NewDecoder(responseRecorder.Body).Decode(&response); err != nil {
+
+	err := json.NewDecoder(responseRecorder.Body).Decode(&response)
+	if err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
@@ -307,6 +320,7 @@ func TestReadyHandler_MixedCheckerResults(t *testing.T) {
 	}
 
 	foundError := false
+
 	for _, check := range response.Checks {
 		if check.Name == "redis" && check.Status == vital.StatusError {
 			foundError = true
@@ -347,7 +361,9 @@ func TestReadyHandler_Timeout(t *testing.T) {
 	}
 
 	var response vital.ReadyResponse
-	if err := json.NewDecoder(responseRecorder.Body).Decode(&response); err != nil {
+
+	err := json.NewDecoder(responseRecorder.Body).Decode(&response)
+	if err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
@@ -403,7 +419,9 @@ func TestReadyHandler_ZeroTimeout(t *testing.T) {
 	}
 
 	var response vital.ReadyResponse
-	if err := json.NewDecoder(responseRecorder.Body).Decode(&response); err != nil {
+
+	err := json.NewDecoder(responseRecorder.Body).Decode(&response)
+	if err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
@@ -431,7 +449,9 @@ func TestLiveHandlerFunc_Direct(t *testing.T) {
 	}
 
 	var response vital.LiveResponse
-	if err := json.NewDecoder(responseRecorder.Body).Decode(&response); err != nil {
+
+	err := json.NewDecoder(responseRecorder.Body).Decode(&response)
+	if err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
@@ -469,7 +489,9 @@ func TestReadyHandlerFunc_Direct(t *testing.T) {
 	}
 
 	var response vital.ReadyResponse
-	if err := json.NewDecoder(responseRecorder.Body).Decode(&response); err != nil {
+
+	err := json.NewDecoder(responseRecorder.Body).Decode(&response)
+	if err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
@@ -505,7 +527,9 @@ func TestReadyHandler_ContextCancellation(t *testing.T) {
 
 	// THEN: should detect context cancellation
 	var response vital.ReadyResponse
-	if err := json.NewDecoder(responseRecorder.Body).Decode(&response); err != nil {
+
+	err := json.NewDecoder(responseRecorder.Body).Decode(&response)
+	if err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 

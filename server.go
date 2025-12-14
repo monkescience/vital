@@ -124,7 +124,7 @@ func (server *Server) Run() {
 
 	// Start server in a goroutine
 	go func() {
-		err := server.start()
+		err := server.Start()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErrors <- err
 		}
@@ -152,7 +152,7 @@ func (server *Server) Run() {
 			slog.String("signal", sig.String()),
 		)
 
-		err := server.stop()
+		err := server.Stop()
 		if err != nil {
 			server.logger.Error(
 				"failed to stop server gracefully",
@@ -165,9 +165,9 @@ func (server *Server) Run() {
 	}
 }
 
-// start begins listening and serving HTTP or HTTPS requests.
+// Start begins listening and serving HTTP or HTTPS requests.
 // It blocks until the server stops or encounters an error.
-func (server *Server) start() error {
+func (server *Server) Start() error {
 	server.logger.Info(
 		"starting server",
 		slog.Int("port", server.port),
@@ -190,8 +190,8 @@ func (server *Server) start() error {
 	return nil
 }
 
-// stop gracefully shuts down the server with a timeout.
-func (server *Server) stop() error {
+// Stop gracefully shuts down the server with the configured shutdown timeout.
+func (server *Server) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), server.shutdownTimeout)
 
 	server.logger.Info(

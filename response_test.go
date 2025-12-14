@@ -1,21 +1,23 @@
-package vital
+package vital_test
 
 import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/monkescience/vital"
 )
 
 func TestProblemDetail_MarshalJSON(t *testing.T) {
 	tests := []struct {
 		name     string
-		problem  *ProblemDetail
+		problem  *vital.ProblemDetail
 		expected map[string]any
 	}{
 		{
 			name: "minimal problem detail",
-			problem: &ProblemDetail{
+			problem: &vital.ProblemDetail{
 				Status: http.StatusBadRequest,
 				Title:  "Bad Request",
 			},
@@ -26,7 +28,7 @@ func TestProblemDetail_MarshalJSON(t *testing.T) {
 		},
 		{
 			name: "complete problem detail",
-			problem: &ProblemDetail{
+			problem: &vital.ProblemDetail{
 				Type:     "https://example.com/problems/validation-error",
 				Title:    "Validation Error",
 				Status:   http.StatusBadRequest,
@@ -43,7 +45,7 @@ func TestProblemDetail_MarshalJSON(t *testing.T) {
 		},
 		{
 			name: "problem detail with extensions",
-			problem: &ProblemDetail{
+			problem: &vital.ProblemDetail{
 				Status: http.StatusUnprocessableEntity,
 				Title:  "Invalid Input",
 				Extensions: map[string]any{
@@ -72,6 +74,7 @@ func TestProblemDetail_MarshalJSON(t *testing.T) {
 			}
 
 			var result map[string]any
+
 			err = json.Unmarshal(data, &result)
 			if err != nil {
 				t.Fatalf("failed to unmarshal result: %v", err)
@@ -82,6 +85,7 @@ func TestProblemDetail_MarshalJSON(t *testing.T) {
 				actualValue, exists := result[key]
 				if !exists {
 					t.Errorf("expected key %q not found in result", key)
+
 					continue
 				}
 
@@ -106,7 +110,7 @@ func TestNewProblemDetail(t *testing.T) {
 	title := "Resource Not Found"
 
 	// WHEN: creating a new problem detail
-	problem := NewProblemDetail(status, title)
+	problem := vital.NewProblemDetail(status, title)
 
 	// THEN: it should have the correct status and title
 	if problem.Status != http.StatusNotFound {
@@ -120,7 +124,7 @@ func TestNewProblemDetail(t *testing.T) {
 
 func TestProblemDetail_Chaining(t *testing.T) {
 	// GIVEN: a base problem detail
-	baseProblem := NewProblemDetail(http.StatusBadRequest, "Bad Request")
+	baseProblem := vital.NewProblemDetail(http.StatusBadRequest, "Bad Request")
 
 	// WHEN: chaining multiple builder methods
 	problem := baseProblem.
@@ -154,14 +158,14 @@ func TestProblemDetail_Chaining(t *testing.T) {
 
 func TestRespondProblem(t *testing.T) {
 	// GIVEN: a problem detail with type and instance
-	problem := BadRequest("Invalid email format").
+	problem := vital.BadRequest("Invalid email format").
 		WithType("https://example.com/problems/validation").
 		WithInstance("/api/users")
 
 	recorder := httptest.NewRecorder()
 
 	// WHEN: responding with the problem detail
-	RespondProblem(recorder, problem)
+	vital.RespondProblem(recorder, problem)
 
 	// THEN: it should return the correct status code and content type
 	if recorder.Code != http.StatusBadRequest {
@@ -174,6 +178,7 @@ func TestRespondProblem(t *testing.T) {
 	}
 
 	var result map[string]any
+
 	err := json.Unmarshal(recorder.Body.Bytes(), &result)
 	if err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
@@ -195,55 +200,55 @@ func TestRespondProblem(t *testing.T) {
 func TestCommonProblemConstructors(t *testing.T) {
 	tests := []struct {
 		name           string
-		constructor    func(string) *ProblemDetail
+		constructor    func(string) *vital.ProblemDetail
 		expectedStatus int
 		expectedTitle  string
 	}{
 		{
 			name:           "BadRequest",
-			constructor:    BadRequest,
+			constructor:    vital.BadRequest,
 			expectedStatus: http.StatusBadRequest,
 			expectedTitle:  "Bad Request",
 		},
 		{
 			name:           "Unauthorized",
-			constructor:    Unauthorized,
+			constructor:    vital.Unauthorized,
 			expectedStatus: http.StatusUnauthorized,
 			expectedTitle:  "Unauthorized",
 		},
 		{
 			name:           "Forbidden",
-			constructor:    Forbidden,
+			constructor:    vital.Forbidden,
 			expectedStatus: http.StatusForbidden,
 			expectedTitle:  "Forbidden",
 		},
 		{
 			name:           "NotFound",
-			constructor:    NotFound,
+			constructor:    vital.NotFound,
 			expectedStatus: http.StatusNotFound,
 			expectedTitle:  "Not Found",
 		},
 		{
 			name:           "Conflict",
-			constructor:    Conflict,
+			constructor:    vital.Conflict,
 			expectedStatus: http.StatusConflict,
 			expectedTitle:  "Conflict",
 		},
 		{
 			name:           "UnprocessableEntity",
-			constructor:    UnprocessableEntity,
+			constructor:    vital.UnprocessableEntity,
 			expectedStatus: http.StatusUnprocessableEntity,
 			expectedTitle:  "Unprocessable Entity",
 		},
 		{
 			name:           "InternalServerError",
-			constructor:    InternalServerError,
+			constructor:    vital.InternalServerError,
 			expectedStatus: http.StatusInternalServerError,
 			expectedTitle:  "Internal Server Error",
 		},
 		{
 			name:           "ServiceUnavailable",
-			constructor:    ServiceUnavailable,
+			constructor:    vital.ServiceUnavailable,
 			expectedStatus: http.StatusServiceUnavailable,
 			expectedTitle:  "Service Unavailable",
 		},

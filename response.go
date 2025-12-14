@@ -3,6 +3,7 @@ package vital
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 )
 
@@ -63,9 +64,7 @@ func (p ProblemDetail) MarshalJSON() ([]byte, error) {
 	}
 
 	// Add any extensions
-	for k, v := range p.Extensions {
-		fields[k] = v
-	}
+	maps.Copy(fields, p.Extensions)
 
 	data, err := json.Marshal(fields)
 	if err != nil {

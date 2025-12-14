@@ -1,7 +1,8 @@
+# golangci-lint v2.7.2 (2025-12-14)
 version: "2"
 
 run:
-  tests: false
+  tests: true
 
 linters:
   settings:
@@ -13,121 +14,177 @@ linters:
           xml: snake
           bson: snake
 
+  exclusions:
+    rules:
+      # Disable strict linters in test files
+      - path: _test\.go
+        linters:
+          - funlen
+          - dupl
+          - goconst
+          - mnd
+          - wrapcheck
+          - err113
+          - gocognit
+          - gosec
+
   default: none
   enable:
-    - arangolint
-    - asasalint
-    - asciicheck
-    - bidichk
-    - bodyclose
-    - canonicalheader
-    - containedctx
-    - contextcheck
-    - copyloopvar
-    - cyclop
-    - decorder
-    # - depguard
-    - dogsled
-    - dupl
-    - dupword
-    - durationcheck
-    - embeddedstructfieldcheck
-    - err113
+    # Core (must have)
     - errcheck
-    - errchkjson
-    - errname
-    - errorlint
-    - exhaustive
-    - exhaustruct
-    - exptostd
-    - fatcontext
-    - forbidigo
-    - forcetypeassert
-    - funcorder
-    - funlen
-    # - ginkgolinter
-    - gocheckcompilerdirectives
-    - gochecknoglobals
-    - gochecknoinits
-    - gochecksumtype
-    - gocognit
-    - goconst
-    - gocritic
-    - gocyclo
-    - godot
-    - godox
-    - goheader
-    - gomoddirectives
-    - gomodguard
-    - goprintffuncname
-    - gosec
-    - gosmopolitan
     - govet
-    - grouper
-    - iface
-    - importas
-    - inamedparam
+    - staticcheck
     - ineffassign
-    - interfacebloat
-    - intrange
-    - ireturn
-    - lll
-    - loggercheck
-    - maintidx
-    - makezero
-    - mirror
-    - misspell
-    - mnd
-    - musttag
-    - nakedret
-    - nestif
+    - unused
+
+    # Bug detection
+    - bodyclose
     - nilerr
     - nilnesserr
     - nilnil
-    - nlreturn
+    - durationcheck
+    - errchkjson
+    - contextcheck
     - noctx
-    - noinlineerr
-    - nolintlint
-    - nonamedreturns
-    - nosprintfhostport
-    - paralleltest
-    - perfsprint
-    - prealloc
-    - predeclared
-    - promlinter
-    - protogetter
+    - makezero
     - reassign
-    - recvcheck
-    # - revive
-    - rowserrcheck
-    - sloglint
-    - spancheck
+    - wastedassign
+    - forcetypeassert
+    - noinlineerr
+    - iotamixing
+    - gochecksumtype
+    - musttag
     - sqlclosecheck
-    - staticcheck
-    - tagalign
-    - tagliatelle
-    - testableexamples
-    # - testifylint
-    - testpackage
-    - thelper
-    - tparallel
+    - rowserrcheck
+    - unqueryvet
+
+    # Security
+    - gosec
+
+    # Code quality
+    - gocognit
+    - goconst
+    - gocritic
     - unconvert
     - unparam
-    - unused
+    - prealloc
+    - perfsprint
     - usestdlibvars
-    - usetesting
-    - varnamelen
-    - wastedassign
+    - intrange
+    - copyloopvar
+    - nestif
+    - decorder
+    - grouper
+    - importas
+    - modernize
+    - iface
+
+    # Style
+    - misspell
+    - dupword
+    - asciicheck
+    - bidichk
     - whitespace
-    - wrapcheck
+    - dogsled
+    - nakedret
+    - predeclared
+    - errname
+    - errorlint
+    - funlen
+    - lll
+    - nonamedreturns
+    - godot
+    - tagliatelle
+    - tagalign
+    - nlreturn
     - wsl_v5
-    - zerologlint
+    - godoclint
+    - godox
+    - funcorder
+
+    # Strict error handling
+    - err113
+    - wrapcheck
+
+    # Magic numbers
+    - mnd
+
+    # Testing
+    - thelper
+    - testpackage
+    - testableexamples
+    - tparallel
+    - usetesting
+
+    # Logging
+    - sloglint
+
+    # HTTP
+    - canonicalheader
+
+    # Observability
+    - spancheck
+    - promlinter
+
+    # Lint hygiene
+    - nolintlint
+
+    # Other useful
+    - asasalint
+    - containedctx
+    - fatcontext
+    - mirror
+    - nosprintfhostport
+    - gomoddirectives
+    - goprintffuncname
+    - gocheckcompilerdirectives
+    - gochecknoinits
+    - exhaustive
+    - interfacebloat
+    - inamedparam
+    - dupl
+    - recvcheck
+    - exptostd
+    - forbidigo
+    - protogetter
+
+    # --- Disabled linters (with reasons) ---
+
+    # Too strict / noisy
+    # - exhaustruct          # requires ALL struct fields initialized - extremely noisy
+    # - varnamelen           # opinionated variable name length rules - often annoying
+    # - gochecknoglobals     # forbids all globals - too restrictive, many legitimate uses
+    # - paralleltest         # requires t.Parallel() everywhere - can be noisy
+
+    # Redundant with existing linters
+    # - cyclop               # cyclomatic complexity - already have gocognit
+    # - gocyclo              # cyclomatic complexity - already have gocognit
+    # - maintidx             # maintainability index - arbitrary metric, gocognit is better
+    # - revive               # golint replacement - gocritic covers similar rules
+
+    # Framework/library specific (enable if using)
+    # - arangolint           # ArangoDB client best practices
+    # - ginkgolinter         # Ginkgo/Gomega test framework
+    # - zerologlint          # zerolog logger
+    # - testifylint          # testify assertions - enable if using testify
+    # - loggercheck          # kitlog/klog/logr/zap - already have sloglint for slog
+
+    # Needs configuration / project-specific
+    # - depguard             # block/allow package imports - needs allowlist config
+    # - gomodguard           # block/allow module dependencies - needs config
+    # - goheader             # file header checks - only for license boilerplate
+
+    # Opinionated / often wrong
+    # - ireturn              # "return concrete types" - often incorrect for interfaces
+    # - embeddedstructfieldcheck  # strict embedded field ordering - too pedantic
+
+    # i18n / niche
+    # - gosmopolitan         # i18n/l10n anti-patterns - very niche use case
+
+    # Deprecated
+    # - wsl                  # deprecated - using wsl_v5 instead
 
 formatters:
   enable:
-    # - gci
-    # - gofmt
     - gofumpt
     - goimports
-    # - golines
-    # - swaggo

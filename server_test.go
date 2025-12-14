@@ -1,44 +1,33 @@
-package vital
+package vital_test
 
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/monkescience/vital"
 )
 
 func TestNewServer(t *testing.T) {
-	t.Run("creates server with default values", func(t *testing.T) {
+	t.Run("creates server with handler", func(t *testing.T) {
 		// GIVEN: a basic HTTP handler
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
 
 		// WHEN: creating a new server with no options
-		server := NewServer(handler)
+		server := vital.NewServer(handler)
 
-		// THEN: it should have default configuration
+		// THEN: it should have the handler set
 		if server.Handler == nil {
 			t.Error("expected handler to be set")
-		}
-		if server.ReadHeaderTimeout != readHeaderTimeout {
-			t.Errorf("expected ReadHeaderTimeout %v, got %v", readHeaderTimeout, server.ReadHeaderTimeout)
-		}
-		if server.WriteTimeout != writeTimeout {
-			t.Errorf("expected WriteTimeout %v, got %v", writeTimeout, server.WriteTimeout)
-		}
-		if server.IdleTimeout != idleTimeout {
-			t.Errorf("expected IdleTimeout %v, got %v", idleTimeout, server.IdleTimeout)
-		}
-		if server.shutdownTimeout != defaultShutdownTimeout {
-			t.Errorf("expected shutdownTimeout %v, got %v", defaultShutdownTimeout, server.shutdownTimeout)
-		}
-		if server.useTLS {
-			t.Error("expected useTLS to be false by default")
 		}
 	})
 
@@ -50,38 +39,12 @@ func TestNewServer(t *testing.T) {
 		expectedPort := 8080
 
 		// WHEN: creating a server with WithPort option
-		server := NewServer(handler, WithPort(expectedPort))
+		server := vital.NewServer(handler, vital.WithPort(expectedPort))
 
-		// THEN: it should set the port and address
-		if server.port != expectedPort {
-			t.Errorf("expected port %d, got %d", expectedPort, server.port)
-		}
+		// THEN: it should set the address
 		expectedAddr := fmt.Sprintf(":%d", expectedPort)
 		if server.Addr != expectedAddr {
 			t.Errorf("expected address %s, got %s", expectedAddr, server.Addr)
-		}
-	})
-
-	t.Run("configures TLS correctly", func(t *testing.T) {
-		// GIVEN: a handler and TLS certificate paths
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		})
-		certPath := "/path/to/cert.pem"
-		keyPath := "/path/to/key.pem"
-
-		// WHEN: creating a server with WithTLS option
-		server := NewServer(handler, WithTLS(certPath, keyPath))
-
-		// THEN: it should enable TLS and set certificate paths
-		if !server.useTLS {
-			t.Error("expected useTLS to be true")
-		}
-		if server.certificatePath != certPath {
-			t.Errorf("expected certificatePath %s, got %s", certPath, server.certificatePath)
-		}
-		if server.keyPath != keyPath {
-			t.Errorf("expected keyPath %s, got %s", keyPath, server.keyPath)
 		}
 	})
 
@@ -90,30 +53,27 @@ func TestNewServer(t *testing.T) {
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
-		customShutdown := 30 * time.Second
 		customRead := 5 * time.Second
 		customWrite := 15 * time.Second
 		customIdle := 60 * time.Second
 
 		// WHEN: creating a server with custom timeout options
-		server := NewServer(
+		server := vital.NewServer(
 			handler,
-			WithShutdownTimeout(customShutdown),
-			WithReadTimeout(customRead),
-			WithWriteTimeout(customWrite),
-			WithIdleTimeout(customIdle),
+			vital.WithReadTimeout(customRead),
+			vital.WithWriteTimeout(customWrite),
+			vital.WithIdleTimeout(customIdle),
 		)
 
-		// THEN: it should use the custom timeout values
-		if server.shutdownTimeout != customShutdown {
-			t.Errorf("expected shutdownTimeout %v, got %v", customShutdown, server.shutdownTimeout)
-		}
+		// THEN: it should use the custom timeout values (accessible via embedded http.Server)
 		if server.ReadHeaderTimeout != customRead {
 			t.Errorf("expected ReadHeaderTimeout %v, got %v", customRead, server.ReadHeaderTimeout)
 		}
+
 		if server.WriteTimeout != customWrite {
 			t.Errorf("expected WriteTimeout %v, got %v", customWrite, server.WriteTimeout)
 		}
+
 		if server.IdleTimeout != customIdle {
 			t.Errorf("expected IdleTimeout %v, got %v", customIdle, server.IdleTimeout)
 		}
@@ -124,97 +84,92 @@ func TestNewServer(t *testing.T) {
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
-		customLogger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+		customLogger := slog.New(slog.DiscardHandler)
 
 		// WHEN: creating a server with WithLogger option
-		server := NewServer(handler, WithLogger(customLogger))
+		server := vital.NewServer(handler, vital.WithLogger(customLogger))
 
-		// THEN: it should use the custom logger
-		if server.logger != customLogger {
-			t.Error("expected custom logger to be set")
-		}
+		// THEN: it should configure ErrorLog (accessible via embedded http.Server)
 		if server.ErrorLog == nil {
 			t.Error("expected ErrorLog to be configured")
 		}
 	})
 
-	t.Run("applies multiple options in order", func(t *testing.T) {
+	t.Run("applies multiple options", func(t *testing.T) {
 		// GIVEN: a handler and multiple configuration options
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
 		port := 9000
-		certPath := "/cert.pem"
-		keyPath := "/key.pem"
-		timeout := 25 * time.Second
 
 		// WHEN: creating a server with multiple options
-		server := NewServer(
+		server := vital.NewServer(
 			handler,
-			WithPort(port),
-			WithTLS(certPath, keyPath),
-			WithShutdownTimeout(timeout),
+			vital.WithPort(port),
+			vital.WithShutdownTimeout(25*time.Second),
 		)
 
-		// THEN: all options should be applied
-		if server.port != port {
-			t.Errorf("expected port %d, got %d", port, server.port)
-		}
-		if !server.useTLS {
-			t.Error("expected useTLS to be true")
-		}
-		if server.certificatePath != certPath {
-			t.Errorf("expected certificatePath %s, got %s", certPath, server.certificatePath)
-		}
-		if server.shutdownTimeout != timeout {
-			t.Errorf("expected shutdownTimeout %v, got %v", timeout, server.shutdownTimeout)
+		// THEN: port option should be applied
+		expectedAddr := fmt.Sprintf(":%d", port)
+		if server.Addr != expectedAddr {
+			t.Errorf("expected address %s, got %s", expectedAddr, server.Addr)
 		}
 	})
 }
 
 func TestServer_HTTP(t *testing.T) {
 	t.Run("starts and serves HTTP requests", func(t *testing.T) {
-		// GIVEN: an HTTP server on a random port
+		// GIVEN: an HTTP server on a specific port
 		responseBody := "test response"
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(responseBody))
 		})
 
-		server := NewServer(
+		port := getAvailablePort(t)
+		server := vital.NewServer(
 			handler,
-			WithPort(0), // Use random available port
-			WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+			vital.WithPort(port),
+			vital.WithLogger(slog.New(slog.DiscardHandler)),
 		)
 
 		// Start server in background
 		serverErrors := make(chan error, 1)
+
 		go func() {
-			err := server.start()
-			if err != nil && err != http.ErrServerClosed {
+			err := server.Start()
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
 				serverErrors <- err
 			}
 		}()
 
 		// Wait for server to start
-		time.Sleep(100 * time.Millisecond)
+		serverURL := fmt.Sprintf("http://localhost:%d", port)
+		waitForServer(t, serverURL)
 
-		// Get the actual port the server is listening on
-		addr := server.Addr
-		if addr == ":0" {
-			// Server chose a random port, we need to get it
-			// For testing purposes, let's use a fixed port instead
-			t.Skip("Cannot reliably test with random port in this setup")
-		}
+		// Cleanup
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			_ = server.Shutdown(ctx)
+		}()
 
 		// WHEN: making an HTTP request to the server
 		client := &http.Client{Timeout: 2 * time.Second}
-		resp, err := client.Get(fmt.Sprintf("http://localhost%s", addr))
+
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, serverURL, nil)
+		if err != nil {
+			t.Fatalf("failed to create request: %v", err)
+		}
+
+		resp, err := client.Do(req)
 		// THEN: it should respond successfully
 		if err != nil {
 			t.Fatalf("failed to make HTTP request: %v", err)
 		}
-		defer resp.Body.Close()
+
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("expected status %d, got %d", http.StatusOK, resp.StatusCode)
@@ -229,44 +184,10 @@ func TestServer_HTTP(t *testing.T) {
 			t.Errorf("expected body %q, got %q", responseBody, string(body))
 		}
 
-		// Cleanup
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = server.Shutdown(ctx)
-
 		select {
 		case err := <-serverErrors:
 			t.Fatalf("server error: %v", err)
 		default:
-		}
-	})
-}
-
-func TestServer_HTTPS(t *testing.T) {
-	t.Run("configures HTTPS server correctly", func(t *testing.T) {
-		// GIVEN: a handler and TLS configuration
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		})
-		certPath := "testdata/server.crt"
-		keyPath := "testdata/server.key"
-
-		// WHEN: creating a server with TLS enabled
-		server := NewServer(
-			handler,
-			WithPort(8443),
-			WithTLS(certPath, keyPath),
-		)
-
-		// THEN: it should have TLS configuration
-		if !server.useTLS {
-			t.Error("expected useTLS to be true")
-		}
-		if server.certificatePath != certPath {
-			t.Errorf("expected certificatePath %s, got %s", certPath, server.certificatePath)
-		}
-		if server.keyPath != keyPath {
-			t.Errorf("expected keyPath %s, got %s", keyPath, server.keyPath)
 		}
 	})
 }
@@ -278,22 +199,24 @@ func TestServer_Stop(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		server := NewServer(
+		port := getAvailablePort(t)
+		server := vital.NewServer(
 			handler,
-			WithPort(0),
-			WithShutdownTimeout(5*time.Second),
-			WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+			vital.WithPort(port),
+			vital.WithShutdownTimeout(5*time.Second),
+			vital.WithLogger(slog.New(slog.DiscardHandler)),
 		)
 
 		// Start server
 		go func() {
-			_ = server.start()
+			_ = server.Start()
 		}()
 
-		time.Sleep(100 * time.Millisecond)
+		serverURL := fmt.Sprintf("http://localhost:%d", port)
+		waitForServer(t, serverURL)
 
 		// WHEN: stopping the server
-		err := server.stop()
+		err := server.Stop()
 		// THEN: it should shut down without error
 		if err != nil {
 			t.Errorf("expected no error during shutdown, got: %v", err)
@@ -301,29 +224,35 @@ func TestServer_Stop(t *testing.T) {
 	})
 
 	t.Run("respects shutdown timeout", func(t *testing.T) {
-		// GIVEN: a server with a short shutdown timeout
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// GIVEN: a server with a short shutdown timeout and a slow endpoint
+		mux := http.NewServeMux()
+		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+		mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(10 * time.Second) // Simulate long-running request
 			w.WriteHeader(http.StatusOK)
 		})
 
 		shortTimeout := 100 * time.Millisecond
-		server := NewServer(
-			handler,
-			WithPort(0),
-			WithShutdownTimeout(shortTimeout),
-			WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+		port := getAvailablePort(t)
+		server := vital.NewServer(
+			mux,
+			vital.WithPort(port),
+			vital.WithShutdownTimeout(shortTimeout),
+			vital.WithLogger(slog.New(slog.DiscardHandler)),
 		)
 
 		go func() {
-			_ = server.start()
+			_ = server.Start()
 		}()
 
-		time.Sleep(100 * time.Millisecond)
+		serverURL := fmt.Sprintf("http://localhost:%d/health", port)
+		waitForServer(t, serverURL)
 
-		// WHEN: stopping the server while a request is processing
+		// WHEN: stopping the server
 		start := time.Now()
-		_ = server.stop()
+		_ = server.Stop()
 		elapsed := time.Since(start)
 
 		// THEN: it should respect the shutdown timeout
@@ -351,21 +280,22 @@ func TestServerIntegration_HTTP(t *testing.T) {
 		})
 
 		port := getAvailablePort(t)
-		server := NewServer(
+		server := vital.NewServer(
 			mux,
-			WithPort(port),
-			WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+			vital.WithPort(port),
+			vital.WithLogger(slog.New(slog.DiscardHandler)),
 		)
 
 		// Start server
 		go func() {
-			_ = server.start()
+			_ = server.Start()
 		}()
 
 		// Defer cleanup to ensure it happens
 		defer func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 			defer cancel()
+
 			_ = server.Shutdown(ctx)
 		}()
 
@@ -375,20 +305,28 @@ func TestServerIntegration_HTTP(t *testing.T) {
 		// WHEN: making multiple requests to the server
 		client := &http.Client{Timeout: 2 * time.Second}
 
-		for i := 0; i < 3; i++ {
-			resp, err := client.Get(fmt.Sprintf("http://localhost:%d%s", port, testPath))
+		for i := range 3 {
+			url := fmt.Sprintf("http://localhost:%d%s", port, testPath)
+
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+			if err != nil {
+				t.Fatalf("request %d: failed to create request: %v", i, err)
+			}
+
+			resp, err := client.Do(req)
 			if err != nil {
 				t.Fatalf("request %d failed: %v", i, err)
 			}
 
 			// THEN: all requests should succeed
 			if resp.StatusCode != http.StatusOK {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				t.Errorf("request %d: expected status %d, got %d", i, http.StatusOK, resp.StatusCode)
 			}
 
 			body, err := io.ReadAll(resp.Body)
-			resp.Body.Close()
+			_ = resp.Body.Close()
+
 			if err != nil {
 				t.Fatalf("failed to read response body: %v", err)
 			}
@@ -417,22 +355,23 @@ func TestServerIntegration_HTTPS(t *testing.T) {
 		})
 
 		port := getAvailablePort(t) + 1 // Offset by 1 to avoid conflicts with HTTP test
-		server := NewServer(
+		server := vital.NewServer(
 			mux,
-			WithPort(port),
-			WithTLS("testdata/server.crt", "testdata/server.key"),
-			WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+			vital.WithPort(port),
+			vital.WithTLS("testdata/server.crt", "testdata/server.key"),
+			vital.WithLogger(slog.New(slog.DiscardHandler)),
 		)
 
 		// Start server
 		go func() {
-			_ = server.start()
+			_ = server.Start()
 		}()
 
 		// Defer cleanup to ensure it happens
 		defer func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 			defer cancel()
+
 			_ = server.Shutdown(ctx)
 		}()
 
@@ -444,16 +383,24 @@ func TestServerIntegration_HTTPS(t *testing.T) {
 			Timeout: 2 * time.Second,
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true, //nolint:gosec // Test environment only
+					InsecureSkipVerify: true,
 				},
 			},
 		}
 
-		resp, err := client.Get(fmt.Sprintf("https://localhost:%d%s", port, testPath))
+		url := fmt.Sprintf("https://localhost:%d%s", port, testPath)
+
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+		if err != nil {
+			t.Fatalf("failed to create request: %v", err)
+		}
+
+		resp, err := client.Do(req)
 		if err != nil {
 			t.Fatalf("HTTPS request failed: %v", err)
 		}
-		defer resp.Body.Close()
+
+		defer func() { _ = resp.Body.Close() }()
 
 		// THEN: the HTTPS request should succeed
 		if resp.StatusCode != http.StatusOK {
@@ -478,34 +425,56 @@ func TestServerIntegration_HTTPS(t *testing.T) {
 
 // Helper functions
 
+var testPortCounter atomic.Int32
+
 func getAvailablePort(t *testing.T) int {
 	t.Helper()
 
-	// Use a simple incrementing port strategy for tests
-	// In a real scenario, you'd want to check if the port is available
+	// Use an atomic counter to ensure unique ports across tests
 	basePort := 18080
-	return basePort + (int(time.Now().UnixNano()) % 1000)
+
+	return basePort + int(testPortCounter.Add(1))
 }
 
 func waitForServer(t *testing.T, url string) {
 	t.Helper()
 
+	// Give the server goroutine a moment to start
+	time.Sleep(50 * time.Millisecond)
+
 	client := &http.Client{
-		Timeout: 100 * time.Millisecond,
+		Timeout: 500 * time.Millisecond,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true, //nolint:gosec // Test environment only
+				InsecureSkipVerify: true,
 			},
 		},
 	}
-	maxAttempts := 100
-	for i := 0; i < maxAttempts; i++ {
-		resp, err := client.Get(url)
+
+	maxAttempts := 50
+
+	for range maxAttempts {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			cancel()
+			time.Sleep(100 * time.Millisecond)
+
+			continue
+		}
+
+		resp, err := client.Do(req)
+
+		cancel()
+
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
+
 			return
 		}
-		time.Sleep(25 * time.Millisecond)
+
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	t.Fatalf("server did not become ready at %s", url)

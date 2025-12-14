@@ -1,16 +1,17 @@
-package vital
+package vital_test
 
 import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/monkescience/vital"
 )
 
 func TestBasicAuth(t *testing.T) {
@@ -25,7 +26,7 @@ func TestBasicAuth(t *testing.T) {
 		_, _ = w.Write([]byte("success"))
 	})
 
-	middleware := BasicAuth(validUsername, validPassword, realm)
+	middleware := vital.BasicAuth(validUsername, validPassword, realm)
 	protectedHandler := middleware(handler)
 
 	tests := []struct {
@@ -104,7 +105,7 @@ func TestBasicAuth_DefaultRealm(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	middleware := BasicAuth("user", "pass", "")
+	middleware := vital.BasicAuth("user", "pass", "")
 	protectedHandler := middleware(handler)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -123,6 +124,7 @@ func TestBasicAuth_DefaultRealm(t *testing.T) {
 func TestRequestLogger(t *testing.T) {
 	// GIVEN: a logger and handler that returns 201
 	var buf bytes.Buffer
+
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
@@ -132,11 +134,12 @@ func TestRequestLogger(t *testing.T) {
 		_, _ = w.Write([]byte("created"))
 	})
 
-	middleware := RequestLogger(logger)
+	middleware := vital.RequestLogger(logger)
 	loggedHandler := middleware(handler)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/users", nil)
 	req.Header.Set("User-Agent", "test-agent/1.0")
+
 	rec := httptest.NewRecorder()
 
 	// WHEN: the handler processes the request
@@ -163,6 +166,7 @@ func TestRequestLogger(t *testing.T) {
 
 func TestRequestLogger_CapturesStatusCode(t *testing.T) {
 	var buf bytes.Buffer
+
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
 
 	tests := []struct {
@@ -183,7 +187,7 @@ func TestRequestLogger_CapturesStatusCode(t *testing.T) {
 				w.WriteHeader(tt.statusCode)
 			})
 
-			middleware := RequestLogger(logger)
+			middleware := vital.RequestLogger(logger)
 			loggedHandler := middleware(handler)
 
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -209,13 +213,14 @@ func TestRequestLogger_CapturesStatusCode(t *testing.T) {
 func TestRecovery(t *testing.T) {
 	// GIVEN: a handler that panics
 	var buf bytes.Buffer
+
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		panic("something went wrong")
 	})
 
-	middleware := Recovery(logger)
+	middleware := vital.Recovery(logger)
 	recoveredHandler := middleware(handler)
 
 	req := httptest.NewRequest(http.MethodGet, "/panic", nil)
@@ -242,6 +247,7 @@ func TestRecovery(t *testing.T) {
 func TestRecovery_NormalExecution(t *testing.T) {
 	// GIVEN: a handler that executes normally without panic
 	var buf bytes.Buffer
+
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -249,7 +255,7 @@ func TestRecovery_NormalExecution(t *testing.T) {
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	middleware := Recovery(logger)
+	middleware := vital.Recovery(logger)
 	recoveredHandler := middleware(handler)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -275,9 +281,9 @@ func TestRecovery_NormalExecution(t *testing.T) {
 func TestTraceContext(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify trace context is in context
-		traceID := GetTraceID(r.Context())
-		spanID := GetSpanID(r.Context())
-		traceFlags := GetTraceFlags(r.Context())
+		traceID := vital.GetTraceID(r.Context())
+		spanID := vital.GetSpanID(r.Context())
+		traceFlags := vital.GetTraceFlags(r.Context())
 
 		if traceID == "" || spanID == "" || traceFlags == "" {
 			t.Error("expected trace context in request context")
@@ -288,7 +294,7 @@ func TestTraceContext(t *testing.T) {
 
 	t.Run("generates new trace when no traceparent", func(t *testing.T) {
 		// GIVEN: a request without traceparent header
-		middleware := TraceContext()
+		middleware := vital.TraceContext()
 		wrappedHandler := middleware(handler)
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -298,7 +304,7 @@ func TestTraceContext(t *testing.T) {
 		wrappedHandler.ServeHTTP(rec, req)
 
 		// THEN: it should generate and set a traceparent header
-		traceparent := rec.Header().Get("traceparent")
+		traceparent := rec.Header().Get("Traceparent")
 		if traceparent == "" {
 			t.Error("expected traceparent in response header")
 		}
@@ -332,18 +338,19 @@ func TestTraceContext(t *testing.T) {
 		existingSpanID := "00f067aa0ba902b7"
 		existingTraceparent := fmt.Sprintf("00-%s-%s-01", existingTraceID, existingSpanID)
 
-		middleware := TraceContext()
+		middleware := vital.TraceContext()
 		wrappedHandler := middleware(handler)
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("traceparent", existingTraceparent)
+		req.Header.Set("Traceparent", existingTraceparent)
+
 		rec := httptest.NewRecorder()
 
 		// WHEN: the handler processes the request
 		wrappedHandler.ServeHTTP(rec, req)
 
 		// THEN: it should preserve trace-id but generate new span-id
-		traceparent := rec.Header().Get("traceparent")
+		traceparent := rec.Header().Get("Traceparent")
 		parts := strings.Split(traceparent, "-")
 
 		if parts[1] != existingTraceID {
@@ -364,19 +371,20 @@ func TestTraceContext(t *testing.T) {
 		existingTraceparent := "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
 		existingTracestate := "vendor1=value1,vendor2=value2"
 
-		middleware := TraceContext()
+		middleware := vital.TraceContext()
 		wrappedHandler := middleware(handler)
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("traceparent", existingTraceparent)
-		req.Header.Set("tracestate", existingTracestate)
+		req.Header.Set("Traceparent", existingTraceparent)
+		req.Header.Set("Tracestate", existingTracestate)
+
 		rec := httptest.NewRecorder()
 
 		// WHEN: the handler processes the request
 		wrappedHandler.ServeHTTP(rec, req)
 
 		// THEN: it should propagate tracestate unchanged
-		tracestate := rec.Header().Get("tracestate")
+		tracestate := rec.Header().Get("Tracestate")
 		if tracestate != existingTracestate {
 			t.Errorf("expected tracestate %q, got %q", existingTracestate, tracestate)
 		}
@@ -386,18 +394,19 @@ func TestTraceContext(t *testing.T) {
 		// GIVEN: a request with invalid traceparent
 		invalidTraceparent := "invalid-format"
 
-		middleware := TraceContext()
+		middleware := vital.TraceContext()
 		wrappedHandler := middleware(handler)
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("traceparent", invalidTraceparent)
+		req.Header.Set("Traceparent", invalidTraceparent)
+
 		rec := httptest.NewRecorder()
 
 		// WHEN: the handler processes the request
 		wrappedHandler.ServeHTTP(rec, req)
 
 		// THEN: it should generate new trace (ignore invalid)
-		traceparent := rec.Header().Get("traceparent")
+		traceparent := rec.Header().Get("Traceparent")
 		if traceparent == "" {
 			t.Error("expected traceparent in response")
 		}
@@ -410,19 +419,19 @@ func TestTraceContext(t *testing.T) {
 
 	t.Run("generates unique trace IDs", func(t *testing.T) {
 		// GIVEN: trace context middleware
-		middleware := TraceContext()
+		middleware := vital.TraceContext()
 		wrappedHandler := middleware(handler)
 
 		traceIDs := make(map[string]bool)
 
 		// WHEN: processing multiple requests
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			rec := httptest.NewRecorder()
 
 			wrappedHandler.ServeHTTP(rec, req)
 
-			traceparent := rec.Header().Get("traceparent")
+			traceparent := rec.Header().Get("Traceparent")
 			parts := strings.Split(traceparent, "-")
 			traceID := parts[1]
 
@@ -441,20 +450,21 @@ func TestTraceContext(t *testing.T) {
 		sameTraceID := "4bf92f3577b34da6a3ce929d0e0e4736"
 		sameTraceparent := fmt.Sprintf("00-%s-00f067aa0ba902b7-01", sameTraceID)
 
-		middleware := TraceContext()
+		middleware := vital.TraceContext()
 		wrappedHandler := middleware(handler)
 
 		spanIDs := make(map[string]bool)
 
 		// WHEN: processing multiple requests with same trace
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
-			req.Header.Set("traceparent", sameTraceparent)
+			req.Header.Set("Traceparent", sameTraceparent)
+
 			rec := httptest.NewRecorder()
 
 			wrappedHandler.ServeHTTP(rec, req)
 
-			traceparent := rec.Header().Get("traceparent")
+			traceparent := rec.Header().Get("Traceparent")
 			parts := strings.Split(traceparent, "-")
 			spanID := parts[2]
 
@@ -469,99 +479,14 @@ func TestTraceContext(t *testing.T) {
 	})
 }
 
-func TestParseTraceparent(t *testing.T) {
-	tests := []struct {
-		name        string
-		traceparent string
-		expectError bool
-		expectedTC  *traceContext
-	}{
-		{
-			name:        "valid traceparent",
-			traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-			expectError: false,
-			expectedTC: &traceContext{
-				Version:    "00",
-				TraceID:    "4bf92f3577b34da6a3ce929d0e0e4736",
-				SpanID:     "00f067aa0ba902b7",
-				TraceFlags: "01",
-			},
-		},
-		{
-			name:        "invalid format - too few parts",
-			traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736",
-			expectError: true,
-		},
-		{
-			name:        "invalid version",
-			traceparent: "99-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-			expectError: true,
-		},
-		{
-			name:        "trace-id all zeros",
-			traceparent: "00-00000000000000000000000000000000-00f067aa0ba902b7-01",
-			expectError: true,
-		},
-		{
-			name:        "span-id all zeros",
-			traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01",
-			expectError: true,
-		},
-		{
-			name:        "invalid hex in trace-id",
-			traceparent: "00-4bf92f3577b34da6a3ce929d0e0e473g-00f067aa0ba902b7-01",
-			expectError: true,
-		},
-		{
-			name:        "trace-id too short",
-			traceparent: "00-4bf92f3577b34da6a3ce929d0e0e47-00f067aa0ba902b7-01",
-			expectError: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// GIVEN: a traceparent string
-			// (defined in test case)
-
-			// WHEN: parsing the traceparent
-			tc, err := parseTraceparent(tt.traceparent)
-
-			// THEN: it should match expectations
-			if tt.expectError && err == nil {
-				t.Error("expected error, got nil")
-			}
-
-			if !tt.expectError && err != nil {
-				t.Errorf("expected no error, got: %v", err)
-			}
-
-			if !tt.expectError && tc != nil && tt.expectedTC != nil {
-				if tc.Version != tt.expectedTC.Version {
-					t.Errorf("version: expected %s, got %s", tt.expectedTC.Version, tc.Version)
-				}
-				if tc.TraceID != tt.expectedTC.TraceID {
-					t.Errorf("trace-id: expected %s, got %s", tt.expectedTC.TraceID, tc.TraceID)
-				}
-				if tc.SpanID != tt.expectedTC.SpanID {
-					t.Errorf("span-id: expected %s, got %s", tt.expectedTC.SpanID, tc.SpanID)
-				}
-				if tc.TraceFlags != tt.expectedTC.TraceFlags {
-					t.Errorf("trace-flags: expected %s, got %s", tt.expectedTC.TraceFlags, tc.TraceFlags)
-				}
-			}
-		})
-	}
-}
-
 func TestGetTraceID(t *testing.T) {
 	t.Run("returns trace ID from context", func(t *testing.T) {
 		// GIVEN: a context with a trace ID
 		expectedID := "4bf92f3577b34da6a3ce929d0e0e4736"
-		ctx := context.WithValue(context.Background(), TraceIDKey, expectedID)
+		ctx := context.WithValue(context.Background(), vital.TraceIDKey, expectedID)
 
 		// WHEN: getting the trace ID
-		traceID := GetTraceID(ctx)
+		traceID := vital.GetTraceID(ctx)
 
 		// THEN: it should return the trace ID from context
 		if traceID != expectedID {
@@ -574,77 +499,11 @@ func TestGetTraceID(t *testing.T) {
 		ctx := context.Background()
 
 		// WHEN: getting the trace ID
-		traceID := GetTraceID(ctx)
+		traceID := vital.GetTraceID(ctx)
 
 		// THEN: it should return an empty string
 		if traceID != "" {
 			t.Errorf("expected empty string, got %q", traceID)
-		}
-	})
-}
-
-func TestGenerateTraceID(t *testing.T) {
-	t.Run("generates non-empty ID", func(t *testing.T) {
-		// WHEN: generating a trace ID
-		traceID := generateTraceID()
-
-		// THEN: it should not be empty
-		if traceID == "" {
-			t.Error("expected non-empty trace ID")
-		}
-	})
-
-	t.Run("generates hex-encoded ID", func(t *testing.T) {
-		// WHEN: generating a trace ID
-		traceID := generateTraceID()
-
-		// THEN: it should be valid hex
-		_, err := hex.DecodeString(traceID)
-		if err != nil {
-			t.Errorf("trace ID should be valid hex, got: %s", traceID)
-		}
-	})
-
-	t.Run("generates IDs of expected length", func(t *testing.T) {
-		// WHEN: generating a trace ID
-		traceID := generateTraceID()
-
-		// THEN: it should be 32 characters (16 bytes hex-encoded)
-		if len(traceID) != 32 {
-			t.Errorf("expected length 32, got %d", len(traceID))
-		}
-	})
-}
-
-func TestGenerateSpanID(t *testing.T) {
-	t.Run("generates non-empty ID", func(t *testing.T) {
-		// WHEN: generating a span ID
-		spanID := generateSpanID()
-
-		// THEN: it should not be empty
-		if spanID == "" {
-			t.Error("expected non-empty span ID")
-		}
-	})
-
-	t.Run("generates hex-encoded ID", func(t *testing.T) {
-		// WHEN: generating a span ID
-		spanID := generateSpanID()
-
-		// THEN: it should be valid hex
-		_, err := hex.DecodeString(spanID)
-		if err != nil {
-			t.Errorf("span ID should be valid hex, got: %s", spanID)
-		}
-	})
-
-	t.Run("generates IDs of expected length", func(t *testing.T) {
-		// WHEN: generating a span ID
-		spanID := generateSpanID()
-
-		// THEN: it should be 16 characters (8 bytes hex-encoded)
-		if len(spanID) != 16 {
-			t.Errorf("expected length 16, got %d", len(spanID))
 		}
 	})
 }

@@ -188,6 +188,16 @@ func (h *ContextHandler) WithGroup(name string) slog.Handler {
 	)
 }
 
+// Registry returns the handler's registry for inspection.
+func (h *ContextHandler) Registry() *Registry {
+	return h.registry
+}
+
+// Unwrap returns the underlying handler wrapped by this ContextHandler.
+func (h *ContextHandler) Unwrap() slog.Handler {
+	return h.handler
+}
+
 var (
 	// ErrInvalidLogLevel is returned when an invalid log level is provided.
 	ErrInvalidLogLevel = errors.New("invalid log level")
