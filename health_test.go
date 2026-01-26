@@ -3,6 +3,7 @@ package vital_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,31 @@ import (
 
 	"github.com/monkescience/vital"
 )
+
+// ExampleNewHealthHandler demonstrates creating health check endpoints.
+func ExampleNewHealthHandler() {
+	// Create health handler with version and environment
+	healthHandler := vital.NewHealthHandler(
+		vital.WithVersion("1.0.0"),
+		vital.WithEnvironment("production"),
+	)
+
+	// Mount on router
+	mux := http.NewServeMux()
+	mux.Handle("/", healthHandler)
+
+	fmt.Println("Health endpoints configured")
+	fmt.Println("GET /health/live - liveness probe")
+	fmt.Println("GET /health/ready - readiness probe")
+
+	// Cleanup
+	_ = mux
+
+	// Output:
+	// Health endpoints configured
+	// GET /health/live - liveness probe
+	// GET /health/ready - readiness probe
+}
 
 // mockChecker is a test implementation of the Checker interface.
 type mockChecker struct {

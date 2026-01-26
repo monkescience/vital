@@ -2,12 +2,39 @@ package vital_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/monkescience/vital"
 )
+
+// ExampleRespondProblem demonstrates returning RFC 9457 problem details.
+func ExampleRespondProblem() {
+	// Handler that returns a problem detail
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Return 404 Not Found with problem detail
+		problem := vital.NotFound("user not found").
+			WithType("https://api.example.com/errors/not-found").
+			WithInstance(r.URL.Path)
+
+		vital.RespondProblem(w, problem)
+	})
+
+	// Simulate request
+	req := httptest.NewRequest(http.MethodGet, "/users/123", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	fmt.Printf("Status: %d\n", rec.Code)
+	fmt.Printf("Content-Type: %s\n", rec.Header().Get("Content-Type"))
+
+	// Output:
+	// Status: 404
+	// Content-Type: application/problem+json
+}
 
 func TestProblemDetail_MarshalJSON(t *testing.T) {
 	tests := []struct {

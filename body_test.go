@@ -2,6 +2,7 @@ package vital_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,70 @@ import (
 
 	"github.com/monkescience/vital"
 )
+
+// ExampleDecodeJSON demonstrates decoding JSON request bodies.
+func ExampleDecodeJSON() {
+	// Define request structure
+	type CreateUserRequest struct {
+		Name  string `json:"name" required:"true"`
+		Email string `json:"email" required:"true"`
+	}
+
+	// Handler that decodes JSON
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, err := vital.DecodeJSON[CreateUserRequest](r)
+		if err != nil {
+			vital.RespondProblem(w, vital.BadRequest(err.Error()))
+			return
+		}
+
+		fmt.Printf("User: %s <%s>\n", req.Name, req.Email)
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	// Simulate request
+	jsonBody := `{"name":"Alice","email":"alice@example.com"}`
+	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	// Output:
+	// User: Alice <alice@example.com>
+}
+
+// ExampleDecodeForm demonstrates decoding form-encoded request bodies.
+func ExampleDecodeForm() {
+	// Define request structure
+	type SearchRequest struct {
+		Query string `form:"q" required:"true"`
+		Page  int    `form:"page"`
+	}
+
+	// Handler that decodes form data
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, err := vital.DecodeForm[SearchRequest](r)
+		if err != nil {
+			vital.RespondProblem(w, vital.BadRequest(err.Error()))
+			return
+		}
+
+		fmt.Printf("Search: %s (page %d)\n", req.Query, req.Page)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// Simulate request
+	formBody := "q=golang&page=1"
+	req := httptest.NewRequest(http.MethodPost, "/search", strings.NewReader(formBody))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	// Output:
+	// Search: golang (page 1)
+}
 
 type testUser struct {
 	Name  string `json:"name" form:"name" required:"true"`

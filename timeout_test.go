@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,26 @@ import (
 
 	"github.com/monkescience/vital"
 )
+
+// ExampleTimeout demonstrates using the timeout middleware.
+func ExampleTimeout() {
+	// Create a handler
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("success"))
+	})
+
+	// Wrap with timeout middleware (30 second timeout)
+	timeoutHandler := vital.Timeout(30 * time.Second)(handler)
+
+	fmt.Println("Handler wrapped with 30s timeout")
+
+	// Cleanup
+	_ = timeoutHandler
+
+	// Output:
+	// Handler wrapped with 30s timeout
+}
 
 func TestTimeout(t *testing.T) {
 	tests := []struct {

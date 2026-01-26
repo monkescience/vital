@@ -2,6 +2,7 @@ package vital
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,32 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.28.0"
 	"go.opentelemetry.io/otel/trace"
 )
+
+// ExampleOTel demonstrates using OpenTelemetry middleware.
+func ExampleOTel() {
+	// Create tracer and meter providers
+	tp := sdktrace.NewTracerProvider()
+	mp := sdkmetric.NewMeterProvider()
+
+	// Create handler
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// Wrap with OTel middleware
+	otelHandler := OTel(
+		WithTracerProvider(tp),
+		WithMeterProvider(mp),
+	)(handler)
+
+	fmt.Println("Handler instrumented with OpenTelemetry")
+
+	// Cleanup
+	_ = otelHandler
+
+	// Output:
+	// Handler instrumented with OpenTelemetry
+}
 
 func TestOTel_CreatesSpanForEachRequest(t *testing.T) {
 	// GIVEN: OTel middleware with trace provider

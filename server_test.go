@@ -423,6 +423,30 @@ func TestServerIntegration_HTTPS(t *testing.T) {
 	})
 }
 
+// ExampleNewServer demonstrates creating a basic HTTP server with options.
+func ExampleNewServer() {
+	// Create a simple handler
+	mux := http.NewServeMux()
+	mux.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("Hello, World!"))
+	})
+
+	// Create server with options
+	server := vital.NewServer(mux,
+		vital.WithPort(8080),
+		vital.WithShutdownTimeout(30*time.Second),
+	)
+
+	// Server is ready to use
+	fmt.Printf("Server configured on port %d\n", 8080)
+
+	// Cleanup
+	_ = server
+
+	// Output:
+	// Server configured on port 8080
+}
+
 // Helper functions
 
 var testPortCounter atomic.Int32
