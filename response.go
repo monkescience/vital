@@ -3,6 +3,7 @@ package vital
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -32,21 +33,83 @@ type ProblemDetail struct {
 
 	// Extensions holds any additional members for extensibility.
 	// Use this for problem-type-specific information.
+	// Reserved keys (type, title, status, detail, instance) are rejected during marshaling.
 	Extensions map[string]any `json:"-"`
 }
 
-// NewProblemDetail creates a new ProblemDetail with the specified status and title.
-func NewProblemDetail(status int, title string) *ProblemDetail {
-	//nolint:exhaustruct // Optional fields Type, Detail, Instance are intentionally omitted
-	return &ProblemDetail{
-		Status:     status,
-		Title:      title,
-		Extensions: nil,
+// ProblemOption configures a ProblemDetail.
+type ProblemOption func(*ProblemDetail)
+
+// WithType sets the type URI for the problem detail.
+func WithType(typeURI string) ProblemOption {
+	return func(p *ProblemDetail) {
+		p.Type = typeURI
 	}
 }
 
+// WithDetail sets the detail message for the problem detail.
+func WithDetail(detail string) ProblemOption {
+	return func(p *ProblemDetail) {
+		p.Detail = detail
+	}
+}
+
+// WithInstance sets the instance URI for the problem detail.
+func WithInstance(instance string) ProblemOption {
+	return func(p *ProblemDetail) {
+		p.Instance = instance
+	}
+}
+
+// WithExtension adds a custom extension field to the problem detail.
+// Reserved keys (type, title, status, detail, instance) will cause MarshalJSON to return an error.
+func WithExtension(key string, value any) ProblemOption {
+	return func(p *ProblemDetail) {
+		if p.Extensions == nil {
+			p.Extensions = make(map[string]any)
+		}
+
+		p.Extensions[key] = value
+	}
+}
+
+// NewProblemDetail creates a new ProblemDetail with the specified status, title, and options.
+func NewProblemDetail(status int, title string, opts ...ProblemOption) *ProblemDetail {
+	//nolint:exhaustruct // Optional fields Type, Detail, Instance are intentionally omitted
+	p := &ProblemDetail{
+		Status: status,
+		Title:  title,
+	}
+
+	for _, opt := range opts {
+		opt(p)
+	}
+
+	return p
+}
+
+// ErrReservedExtensionKey is returned when an extension key conflicts with a reserved RFC 9457 field.
+var ErrReservedExtensionKey = errors.New("extension key conflicts with reserved RFC 9457 field")
+
+// reservedKeys contains RFC 9457 standard field names that cannot be used as extensions.
+var reservedKeys = map[string]struct{}{
+	"type":     {},
+	"title":    {},
+	"status":   {},
+	"detail":   {},
+	"instance": {},
+}
+
 // MarshalJSON implements custom JSON marshaling to include extensions.
+// It returns an error if any extension key conflicts with a reserved RFC 9457 field name.
 func (p ProblemDetail) MarshalJSON() ([]byte, error) {
+	// Validate extension keys before marshaling
+	for key := range p.Extensions {
+		if _, reserved := reservedKeys[key]; reserved {
+			return nil, fmt.Errorf("%w: %q", ErrReservedExtensionKey, key)
+		}
+	}
+
 	// Create a map with the standard fields
 	fields := make(map[string]any)
 
@@ -65,7 +128,7 @@ func (p ProblemDetail) MarshalJSON() ([]byte, error) {
 		fields["instance"] = p.Instance
 	}
 
-	// Add any extensions
+	// Add extensions
 	maps.Copy(fields, p.Extensions)
 
 	data, err := json.Marshal(fields)
@@ -74,38 +137,6 @@ func (p ProblemDetail) MarshalJSON() ([]byte, error) {
 	}
 
 	return data, nil
-}
-
-// WithType sets the type URI and returns the ProblemDetail for chaining.
-func (p *ProblemDetail) WithType(typeURI string) *ProblemDetail {
-	p.Type = typeURI
-
-	return p
-}
-
-// WithDetail sets the detail message and returns the ProblemDetail for chaining.
-func (p *ProblemDetail) WithDetail(detail string) *ProblemDetail {
-	p.Detail = detail
-
-	return p
-}
-
-// WithInstance sets the instance URI and returns the ProblemDetail for chaining.
-func (p *ProblemDetail) WithInstance(instance string) *ProblemDetail {
-	p.Instance = instance
-
-	return p
-}
-
-// WithExtension adds a custom extension field and returns the ProblemDetail for chaining.
-func (p *ProblemDetail) WithExtension(key string, value any) *ProblemDetail {
-	if p.Extensions == nil {
-		p.Extensions = make(map[string]any)
-	}
-
-	p.Extensions[key] = value
-
-	return p
 }
 
 // RespondProblem writes a ProblemDetail as an HTTP response.
@@ -122,50 +153,64 @@ func RespondProblem(ctx context.Context, w http.ResponseWriter, problem *Problem
 
 // Common problem detail constructors for standard HTTP errors
 
+// newProblem is a helper that creates a ProblemDetail with detail prepended to options.
+func newProblem(status int, title, detail string, opts ...ProblemOption) *ProblemDetail {
+	allOpts := append([]ProblemOption{WithDetail(detail)}, opts...)
+
+	return NewProblemDetail(status, title, allOpts...)
+}
+
 // BadRequest creates a 400 Bad Request problem detail.
-func BadRequest(detail string) *ProblemDetail {
-	return NewProblemDetail(http.StatusBadRequest, "Bad Request").
-		WithDetail(detail)
+func BadRequest(detail string, opts ...ProblemOption) *ProblemDetail {
+	return newProblem(http.StatusBadRequest, "Bad Request", detail, opts...)
 }
 
 // Unauthorized creates a 401 Unauthorized problem detail.
-func Unauthorized(detail string) *ProblemDetail {
-	return NewProblemDetail(http.StatusUnauthorized, "Unauthorized").
-		WithDetail(detail)
+func Unauthorized(detail string, opts ...ProblemOption) *ProblemDetail {
+	return newProblem(http.StatusUnauthorized, "Unauthorized", detail, opts...)
 }
 
 // Forbidden creates a 403 Forbidden problem detail.
-func Forbidden(detail string) *ProblemDetail {
-	return NewProblemDetail(http.StatusForbidden, "Forbidden").
-		WithDetail(detail)
+func Forbidden(detail string, opts ...ProblemOption) *ProblemDetail {
+	return newProblem(http.StatusForbidden, "Forbidden", detail, opts...)
 }
 
 // NotFound creates a 404 Not Found problem detail.
-func NotFound(detail string) *ProblemDetail {
-	return NewProblemDetail(http.StatusNotFound, "Not Found").
-		WithDetail(detail)
+func NotFound(detail string, opts ...ProblemOption) *ProblemDetail {
+	return newProblem(http.StatusNotFound, "Not Found", detail, opts...)
+}
+
+// MethodNotAllowed creates a 405 Method Not Allowed problem detail.
+func MethodNotAllowed(detail string, opts ...ProblemOption) *ProblemDetail {
+	return newProblem(http.StatusMethodNotAllowed, "Method Not Allowed", detail, opts...)
 }
 
 // Conflict creates a 409 Conflict problem detail.
-func Conflict(detail string) *ProblemDetail {
-	return NewProblemDetail(http.StatusConflict, "Conflict").
-		WithDetail(detail)
+func Conflict(detail string, opts ...ProblemOption) *ProblemDetail {
+	return newProblem(http.StatusConflict, "Conflict", detail, opts...)
+}
+
+// Gone creates a 410 Gone problem detail.
+func Gone(detail string, opts ...ProblemOption) *ProblemDetail {
+	return newProblem(http.StatusGone, "Gone", detail, opts...)
 }
 
 // UnprocessableEntity creates a 422 Unprocessable Entity problem detail.
-func UnprocessableEntity(detail string) *ProblemDetail {
-	return NewProblemDetail(http.StatusUnprocessableEntity, "Unprocessable Entity").
-		WithDetail(detail)
+func UnprocessableEntity(detail string, opts ...ProblemOption) *ProblemDetail {
+	return newProblem(http.StatusUnprocessableEntity, "Unprocessable Entity", detail, opts...)
+}
+
+// TooManyRequests creates a 429 Too Many Requests problem detail.
+func TooManyRequests(detail string, opts ...ProblemOption) *ProblemDetail {
+	return newProblem(http.StatusTooManyRequests, "Too Many Requests", detail, opts...)
 }
 
 // InternalServerError creates a 500 Internal Server Error problem detail.
-func InternalServerError(detail string) *ProblemDetail {
-	return NewProblemDetail(http.StatusInternalServerError, "Internal Server Error").
-		WithDetail(detail)
+func InternalServerError(detail string, opts ...ProblemOption) *ProblemDetail {
+	return newProblem(http.StatusInternalServerError, "Internal Server Error", detail, opts...)
 }
 
 // ServiceUnavailable creates a 503 Service Unavailable problem detail.
-func ServiceUnavailable(detail string) *ProblemDetail {
-	return NewProblemDetail(http.StatusServiceUnavailable, "Service Unavailable").
-		WithDetail(detail)
+func ServiceUnavailable(detail string, opts ...ProblemOption) *ProblemDetail {
+	return newProblem(http.StatusServiceUnavailable, "Service Unavailable", detail, opts...)
 }
