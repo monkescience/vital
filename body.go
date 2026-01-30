@@ -13,6 +13,15 @@ import (
 
 const defaultMaxBodySize = 1024 * 1024 // 1MB
 
+var (
+	// ErrEmptyBody is returned when the request body is empty.
+	ErrEmptyBody = errors.New("empty request body")
+	// ErrBodyTooLarge is returned when the request body exceeds the maximum size.
+	ErrBodyTooLarge = errors.New("request body exceeds maximum size")
+	// ErrMissingFields is returned when required fields are missing from the request.
+	ErrMissingFields = errors.New("missing required fields")
+)
+
 // DecodeOption configures body decoding behavior.
 type DecodeOption func(*decodeConfig)
 
@@ -43,15 +52,19 @@ func DecodeJSON[T any](r *http.Request, opts ...DecodeOption) (T, error) {
 	decoder := json.NewDecoder(limitedReader)
 
 	var result T
-	if err := decoder.Decode(&result); err != nil {
+
+	err := decoder.Decode(&result)
+	if err != nil {
 		if errors.Is(err, io.EOF) {
-			return zero, fmt.Errorf("empty request body")
+			return zero, ErrEmptyBody
 		}
 
 		if decoder.More() {
 			var buf [1]byte
-			if _, readErr := limitedReader.Read(buf[:]); readErr == nil {
-				return zero, fmt.Errorf("request body exceeds maximum size of %d bytes", config.maxBodySize)
+
+			_, readErr := limitedReader.Read(buf[:])
+			if readErr == nil {
+				return zero, fmt.Errorf("%w: %d bytes", ErrBodyTooLarge, config.maxBodySize)
 			}
 		}
 
@@ -59,11 +72,14 @@ func DecodeJSON[T any](r *http.Request, opts ...DecodeOption) (T, error) {
 	}
 
 	var buf [1]byte
-	if n, _ := limitedReader.Read(buf[:]); n > 0 {
-		return zero, fmt.Errorf("request body exceeds maximum size of %d bytes", config.maxBodySize)
+
+	n, _ := limitedReader.Read(buf[:])
+	if n > 0 {
+		return zero, fmt.Errorf("%w: %d bytes", ErrBodyTooLarge, config.maxBodySize)
 	}
 
-	if err := validateRequired(result); err != nil {
+	err = validateRequired(result)
+	if err != nil {
 		return zero, err
 	}
 
@@ -84,21 +100,25 @@ func DecodeForm[T any](r *http.Request, opts ...DecodeOption) (T, error) {
 
 	r.Body = http.MaxBytesReader(nil, r.Body, config.maxBodySize)
 
-	if err := r.ParseForm(); err != nil {
+	err := r.ParseForm()
+	if err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
-			return zero, fmt.Errorf("request body exceeds maximum size of %d bytes", config.maxBodySize)
+			return zero, fmt.Errorf("%w: %d bytes", ErrBodyTooLarge, config.maxBodySize)
 		}
 
 		return zero, fmt.Errorf("invalid form data: %w", err)
 	}
 
 	var result T
-	if err := decodeFormToStruct(r.Form, &result); err != nil {
+
+	err = decodeFormToStruct(r.Form, &result)
+	if err != nil {
 		return zero, err
 	}
 
-	if err := validateRequired(result); err != nil {
+	err = validateRequired(result)
+	if err != nil {
 		return zero, err
 	}
 
@@ -109,7 +129,7 @@ func decodeFormToStruct(form map[string][]string, target any) error {
 	val := reflect.ValueOf(target).Elem()
 	typ := val.Type()
 
-	for i := 0; i < val.NumField(); i++ {
+	for i := range val.NumField() {
 		field := val.Field(i)
 		fieldType := typ.Field(i)
 
@@ -129,6 +149,7 @@ func decodeFormToStruct(form map[string][]string, target any) error {
 
 		formValue := formValues[0]
 
+		//nolint:exhaustive // Only handling supported field types for form decoding
 		switch field.Kind() {
 		case reflect.String:
 			field.SetString(formValue)
@@ -137,25 +158,31 @@ func decodeFormToStruct(form map[string][]string, target any) error {
 			if err != nil {
 				return fmt.Errorf("invalid integer value for field %s: %w", fieldType.Name, err)
 			}
+
 			field.SetInt(intVal)
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 			uintVal, err := strconv.ParseUint(formValue, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid unsigned integer value for field %s: %w", fieldType.Name, err)
 			}
+
 			field.SetUint(uintVal)
 		case reflect.Float32, reflect.Float64:
 			floatVal, err := strconv.ParseFloat(formValue, 64)
 			if err != nil {
 				return fmt.Errorf("invalid float value for field %s: %w", fieldType.Name, err)
 			}
+
 			field.SetFloat(floatVal)
 		case reflect.Bool:
 			boolVal, err := strconv.ParseBool(formValue)
 			if err != nil {
 				return fmt.Errorf("invalid boolean value for field %s: %w", fieldType.Name, err)
 			}
+
 			field.SetBool(boolVal)
+		default:
+			// Unsupported field types are silently skipped
 		}
 	}
 
@@ -168,7 +195,7 @@ func validateRequired(v any) error {
 
 	var missingFields []string
 
-	for i := 0; i < val.NumField(); i++ {
+	for i := range val.NumField() {
 		field := val.Field(i)
 		fieldType := typ.Field(i)
 
@@ -184,13 +211,14 @@ func validateRequired(v any) error {
 	}
 
 	if len(missingFields) > 0 {
-		return fmt.Errorf("missing required fields: %s", strings.Join(missingFields, ", "))
+		return fmt.Errorf("%w: %s", ErrMissingFields, strings.Join(missingFields, ", "))
 	}
 
 	return nil
 }
 
 func isZeroValue(v reflect.Value) bool {
+	//nolint:exhaustive // Only handling common field types for zero value check
 	switch v.Kind() {
 	case reflect.String:
 		return v.String() == ""

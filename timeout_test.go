@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ func ExampleTimeout() {
 	// Create a handler
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
+		_, _ = w.Write([]byte("success"))
 	})
 
 	// Wrap with timeout middleware (30 second timeout)
@@ -108,43 +109,52 @@ func TestTimeout(t *testing.T) {
 
 			// THEN: timeout responses should be ProblemDetail JSON
 			if tt.expectTimeout {
-				contentType := rec.Header().Get("Content-Type")
-				if !strings.Contains(contentType, "application/problem+json") {
-					t.Errorf("expected Content-Type application/problem+json, got %s", contentType)
-				}
-
-				var problem vital.ProblemDetail
-				err := json.NewDecoder(rec.Body).Decode(&problem)
-				if err != nil {
-					t.Fatalf("failed to decode ProblemDetail: %v", err)
-				}
-
-				if problem.Status != http.StatusServiceUnavailable {
-					t.Errorf("expected problem status %d, got %d", http.StatusServiceUnavailable, problem.Status)
-				}
-
-				if problem.Title != "Service Unavailable" {
-					t.Errorf("expected problem title 'Service Unavailable', got %q", problem.Title)
-				}
-
-				if !strings.Contains(problem.Detail, "timeout") && !strings.Contains(problem.Detail, "exceeded") {
-					t.Errorf("expected timeout message in detail, got: %s", problem.Detail)
-				}
+				assertTimeoutProblemResponse(t, rec)
 			}
 		})
 	}
 }
 
+func assertTimeoutProblemResponse(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+
+	contentType := rec.Header().Get("Content-Type")
+	if !strings.Contains(contentType, "application/problem+json") {
+		t.Errorf("expected Content-Type application/problem+json, got %s", contentType)
+	}
+
+	var problem vital.ProblemDetail
+
+	err := json.NewDecoder(rec.Body).Decode(&problem)
+	if err != nil {
+		t.Fatalf("failed to decode ProblemDetail: %v", err)
+	}
+
+	if problem.Status != http.StatusServiceUnavailable {
+		t.Errorf("expected problem status %d, got %d", http.StatusServiceUnavailable, problem.Status)
+	}
+
+	if problem.Title != "Service Unavailable" {
+		t.Errorf("expected problem title 'Service Unavailable', got %q", problem.Title)
+	}
+
+	if !strings.Contains(problem.Detail, "timeout") && !strings.Contains(problem.Detail, "exceeded") {
+		t.Errorf("expected timeout message in detail, got: %s", problem.Detail)
+	}
+}
+
 func TestTimeout_ContextCancellation(t *testing.T) {
 	// GIVEN: a handler that checks context cancellation
-	contextCancelled := false
+	var contextCancelled atomic.Bool
+
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-time.After(100 * time.Millisecond):
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("success"))
 		case <-r.Context().Done():
-			contextCancelled = true
+			contextCancelled.Store(true)
+
 			return
 		}
 	})
@@ -159,7 +169,7 @@ func TestTimeout_ContextCancellation(t *testing.T) {
 	timeoutHandler.ServeHTTP(rec, req)
 
 	// THEN: the context should be cancelled
-	if !contextCancelled {
+	if !contextCancelled.Load() {
 		t.Error("expected context to be cancelled in handler")
 	}
 
@@ -204,6 +214,7 @@ func TestTimeout_WithMiddlewareChain(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// GIVEN: a handler with configurable behavior
 			var buf bytes.Buffer
+
 			logger := slog.New(slog.NewJSONHandler(&buf, nil))
 
 			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -266,17 +277,21 @@ func TestTimeout_WithMiddlewareChain(t *testing.T) {
 
 func TestTimeout_ExternalContextCancellation(t *testing.T) {
 	// GIVEN: a handler that respects context cancellation
-	handlerCalled := false
-	contextCancelled := false
+	var (
+		handlerCalled    atomic.Bool
+		contextCancelled atomic.Bool
+	)
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handlerCalled = true
+		handlerCalled.Store(true)
+
 		select {
 		case <-time.After(200 * time.Millisecond):
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("success"))
 		case <-r.Context().Done():
-			contextCancelled = true
+			contextCancelled.Store(true)
+
 			return
 		}
 	})
@@ -298,12 +313,12 @@ func TestTimeout_ExternalContextCancellation(t *testing.T) {
 	timeoutHandler.ServeHTTP(rec, req)
 
 	// THEN: the handler should be called
-	if !handlerCalled {
+	if !handlerCalled.Load() {
 		t.Error("expected handler to be called")
 	}
 
 	// THEN: the context should be cancelled
-	if !contextCancelled {
+	if !contextCancelled.Load() {
 		t.Error("expected context cancellation to propagate to handler")
 	}
 }

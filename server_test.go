@@ -428,7 +428,7 @@ func ExampleNewServer() {
 	// Create a simple handler
 	mux := http.NewServeMux()
 	mux.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Hello, World!"))
+		_, _ = w.Write([]byte("Hello, World!"))
 	})
 
 	// Create server with options

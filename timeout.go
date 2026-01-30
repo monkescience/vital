@@ -23,6 +23,7 @@ func Timeout(duration time.Duration) Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if duration <= 0 {
 				next.ServeHTTP(w, r)
+
 				return
 			}
 
@@ -42,8 +43,10 @@ func Timeout(duration time.Duration) Middleware {
 					if p := recover(); p != nil {
 						panicChan <- p
 					}
+
 					close(done)
 				}()
+
 				next.ServeHTTP(wrapped, r.WithContext(ctx))
 			}()
 
@@ -96,5 +99,6 @@ func (tw *timeoutResponseWriter) Write(b []byte) (int, error) {
 		tw.headersSent = true
 	}
 
+	//nolint:wrapcheck // Delegating to underlying ResponseWriter, wrapping would lose context
 	return tw.ResponseWriter.Write(b)
 }

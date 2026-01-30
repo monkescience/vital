@@ -48,6 +48,24 @@ func WithPropagator(p propagation.TextMapPropagator) OTelOption {
 	}
 }
 
+func newOTelConfig(opts ...OTelOption) *otelConfig {
+	cfg := &otelConfig{propagator: propagation.TraceContext{}}
+
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	if cfg.tracerProvider == nil {
+		cfg.tracerProvider = otel.GetTracerProvider()
+	}
+
+	if cfg.meterProvider == nil {
+		cfg.meterProvider = otel.GetMeterProvider()
+	}
+
+	return cfg
+}
+
 // OTel returns a middleware that instruments HTTP requests with OpenTelemetry traces and metrics.
 //
 // Features:
@@ -66,23 +84,9 @@ func WithPropagator(p propagation.TextMapPropagator) OTelOption {
 //	    vital.WithMeterProvider(mp),
 //	)(myHandler)
 func OTel(opts ...OTelOption) Middleware {
-	cfg := &otelConfig{
-		propagator: propagation.TraceContext{},
-	}
-	for _, opt := range opts {
-		opt(cfg)
-	}
-
-	if cfg.tracerProvider == nil {
-		cfg.tracerProvider = otel.GetTracerProvider()
-	}
-	if cfg.meterProvider == nil {
-		cfg.meterProvider = otel.GetMeterProvider()
-	}
-
+	cfg := newOTelConfig(opts...)
 	tracer := cfg.tracerProvider.Tracer(instrumentationName)
 	meter := cfg.meterProvider.Meter(instrumentationName)
-
 	durationHistogram, _ := meter.Float64Histogram(
 		"http.server.request.duration",
 		metric.WithDescription("Duration of HTTP server requests"),
@@ -94,44 +98,41 @@ func OTel(opts ...OTelOption) Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := cfg.propagator.Extract(r.Context(), propagation.HeaderCarrier(r.Header))
 
-			ctx, span := tracer.Start(ctx, "HTTP "+r.Method,
-				trace.WithSpanKind(trace.SpanKindServer),
-			)
+			ctx, span := tracer.Start(ctx, "HTTP "+r.Method, trace.WithSpanKind(trace.SpanKindServer))
 			defer span.End()
 
-			spanContext := span.SpanContext()
-			if spanContext.IsValid() {
-				ctx = context.WithValue(ctx, TraceIDKey, spanContext.TraceID().String())
-				ctx = context.WithValue(ctx, SpanIDKey, spanContext.SpanID().String())
+			if spanCtx := span.SpanContext(); spanCtx.IsValid() {
+				ctx = context.WithValue(ctx, TraceIDKey, spanCtx.TraceID().String())
+				ctx = context.WithValue(ctx, SpanIDKey, spanCtx.SpanID().String())
 			}
 
-			r = r.WithContext(ctx)
-
-			rw := &otelResponseWriter{
-				ResponseWriter: w,
-				statusCode:     http.StatusOK,
-			}
-
+			rw := &otelResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 			start := time.Now()
 
 			cfg.propagator.Inject(ctx, propagation.HeaderCarrier(w.Header()))
 
-			next.ServeHTTP(rw, r)
+			next.ServeHTTP(rw, r.WithContext(ctx))
 
-			duration := time.Since(start).Seconds()
-			metricAttrs := []attribute.KeyValue{
-				semconv.HTTPRequestMethodKey.String(r.Method),
-				semconv.HTTPResponseStatusCodeKey.Int(rw.statusCode),
-			}
-			durationHistogram.Record(ctx, duration, metric.WithAttributes(metricAttrs...))
-
-			span.SetAttributes(
-				semconv.HTTPRequestMethodKey.String(r.Method),
-				semconv.HTTPResponseStatusCodeKey.Int(rw.statusCode),
-				semconv.URLPathKey.String(r.URL.Path),
-			)
+			recordOTelMetrics(ctx, r, rw, span, durationHistogram, start)
 		})
 	}
+}
+
+func recordOTelMetrics(
+	ctx context.Context,
+	r *http.Request,
+	rw *otelResponseWriter,
+	span trace.Span,
+	histogram metric.Float64Histogram,
+	start time.Time,
+) {
+	duration := time.Since(start).Seconds()
+	attrs := []attribute.KeyValue{
+		semconv.HTTPRequestMethodKey.String(r.Method),
+		semconv.HTTPResponseStatusCodeKey.Int(rw.statusCode),
+	}
+	histogram.Record(ctx, duration, metric.WithAttributes(attrs...))
+	span.SetAttributes(append(attrs, semconv.URLPathKey.String(r.URL.Path))...)
 }
 
 // otelResponseWriter wraps http.ResponseWriter to capture status code.

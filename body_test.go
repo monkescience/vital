@@ -15,7 +15,7 @@ import (
 func ExampleDecodeJSON() {
 	// Define request structure
 	type CreateUserRequest struct {
-		Name  string `json:"name" required:"true"`
+		Name  string `json:"name"  required:"true"`
 		Email string `json:"email" required:"true"`
 	}
 
@@ -24,6 +24,7 @@ func ExampleDecodeJSON() {
 		req, err := vital.DecodeJSON[CreateUserRequest](r)
 		if err != nil {
 			vital.RespondProblem(w, vital.BadRequest(err.Error()))
+
 			return
 		}
 
@@ -35,6 +36,7 @@ func ExampleDecodeJSON() {
 	jsonBody := `{"name":"Alice","email":"alice@example.com"}`
 	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
+
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -47,7 +49,7 @@ func ExampleDecodeJSON() {
 func ExampleDecodeForm() {
 	// Define request structure
 	type SearchRequest struct {
-		Query string `form:"q" required:"true"`
+		Query string `form:"q"    required:"true"`
 		Page  int    `form:"page"`
 	}
 
@@ -56,6 +58,7 @@ func ExampleDecodeForm() {
 		req, err := vital.DecodeForm[SearchRequest](r)
 		if err != nil {
 			vital.RespondProblem(w, vital.BadRequest(err.Error()))
+
 			return
 		}
 
@@ -67,6 +70,7 @@ func ExampleDecodeForm() {
 	formBody := "q=golang&page=1"
 	req := httptest.NewRequest(http.MethodPost, "/search", strings.NewReader(formBody))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -76,14 +80,9 @@ func ExampleDecodeForm() {
 }
 
 type testUser struct {
-	Name  string `json:"name" form:"name" required:"true"`
-	Email string `json:"email" form:"email" required:"true"`
-	Age   int    `json:"age" form:"age"`
-}
-
-type testOptionalFields struct {
-	Name    string `json:"name" form:"name"`
-	Country string `json:"country" form:"country"`
+	Name  string `form:"name"  json:"name"  required:"true"`
+	Email string `form:"email" json:"email" required:"true"`
+	Age   int    `form:"age"   json:"age"`
 }
 
 func TestDecodeJSON_ValidJSON(t *testing.T) {
@@ -94,7 +93,6 @@ func TestDecodeJSON_ValidJSON(t *testing.T) {
 
 	// WHEN: decoding the JSON body
 	user, err := vital.DecodeJSON[testUser](req)
-
 	// THEN: it should decode successfully
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -210,7 +208,6 @@ func TestDecodeJSON_UnknownFields(t *testing.T) {
 
 	// WHEN: decoding the JSON body
 	user, err := vital.DecodeJSON[testUser](req)
-
 	// THEN: it should decode successfully (unknown fields ignored by default)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -271,7 +268,6 @@ func TestDecodeForm_ValidForm(t *testing.T) {
 
 	// WHEN: decoding the form body
 	user, err := vital.DecodeForm[testUser](req)
-
 	// THEN: it should decode successfully
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -455,6 +451,7 @@ func TestDecodeJSON_InHandler(t *testing.T) {
 		if err != nil {
 			problem := vital.BadRequest(err.Error())
 			vital.RespondProblem(w, problem)
+
 			return
 		}
 
@@ -487,6 +484,7 @@ func TestDecodeJSON_InHandler(t *testing.T) {
 			// WHEN: making a request to the handler
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")
+
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)
@@ -503,6 +501,7 @@ func TestDecodeJSON_InHandler(t *testing.T) {
 			if tt.expectedStatus == http.StatusBadRequest {
 				// Verify ProblemDetail structure
 				var problem vital.ProblemDetail
+
 				err := json.NewDecoder(rec.Body).Decode(&problem)
 				if err != nil {
 					t.Fatalf("failed to decode ProblemDetail: %v", err)
@@ -527,6 +526,7 @@ func TestDecodeForm_InHandler(t *testing.T) {
 		if err != nil {
 			problem := vital.UnprocessableEntity(err.Error())
 			vital.RespondProblem(w, problem)
+
 			return
 		}
 
@@ -559,6 +559,7 @@ func TestDecodeForm_InHandler(t *testing.T) {
 			// WHEN: making a request to the handler
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)
@@ -575,6 +576,7 @@ func TestDecodeForm_InHandler(t *testing.T) {
 			if tt.expectedStatus == http.StatusUnprocessableEntity {
 				// Verify ProblemDetail structure
 				var problem vital.ProblemDetail
+
 				err := json.NewDecoder(rec.Body).Decode(&problem)
 				if err != nil {
 					t.Fatalf("failed to decode ProblemDetail: %v", err)
