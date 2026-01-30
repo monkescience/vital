@@ -7,7 +7,6 @@ Production-ready HTTP server utilities for Go with built-in observability, healt
 - **Server Management**: Graceful shutdown, TLS support, configurable timeouts
 - **Health Checks**: Liveness and readiness endpoints with custom checkers
 - **Middleware**: Timeout, OpenTelemetry, request logging, recovery, basic auth
-- **Request Body Parsing**: Type-safe JSON and form decoding with validation
 - **Error Responses**: RFC 9457 ProblemDetail for consistent error handling
 - **Structured Logging**: Context-aware logging with trace correlation
 
@@ -316,66 +315,6 @@ Recommended order (innermost to outermost):
 3. RequestLogger - log requests
 4. Recovery - catch panics
 
-## Request Body Parsing
-
-### JSON Decoding
-
-Type-safe JSON decoding with validation:
-
-```go
-type CreateUserRequest struct {
-	Name  string `json:"name" required:"true"`
-	Email string `json:"email" required:"true"`
-	Age   int    `json:"age"`
-}
-
-func createUser(w http.ResponseWriter, r *http.Request) {
-	req, err := vital.DecodeJSON[CreateUserRequest](r)
-	if err != nil {
-		vital.RespondProblem(w, vital.BadRequest(err.Error()))
-		return
-	}
-
-	// Use req.Name, req.Email, req.Age
-	w.WriteHeader(http.StatusCreated)
-}
-```
-
-Features:
-- Validates required fields (use `required:"true"` tag)
-- Enforces body size limit (default 1MB)
-- Returns descriptive error messages
-
-### Form Decoding
-
-Decode URL-encoded form data:
-
-```go
-type SearchRequest struct {
-	Query string `form:"q" required:"true"`
-	Page  int    `form:"page"`
-	Limit int    `form:"limit"`
-}
-
-func search(w http.ResponseWriter, r *http.Request) {
-	req, err := vital.DecodeForm[SearchRequest](r)
-	if err != nil {
-		vital.RespondProblem(w, vital.BadRequest(err.Error()))
-		return
-	}
-
-	// Use req.Query, req.Page, req.Limit
-}
-```
-
-### Custom Body Size Limit
-
-```go
-req, err := vital.DecodeJSON[LargeRequest](r,
-	vital.WithMaxBodySize(10 * 1024 * 1024), // 10MB
-)
-```
-
 ## Error Responses
 
 Use RFC 9457 ProblemDetail for consistent error responses:
@@ -494,6 +433,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
@@ -519,8 +459,8 @@ func (c *DatabaseChecker) Check(ctx context.Context) (vital.Status, string) {
 }
 
 type CreateUserRequest struct {
-	Name  string `json:"name" required:"true"`
-	Email string `json:"email" required:"true"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
 
 func main() {
@@ -551,8 +491,8 @@ func main() {
 
 	// API routes
 	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, r *http.Request) {
-		req, err := vital.DecodeJSON[CreateUserRequest](r)
-		if err != nil {
+		var req CreateUserRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			vital.RespondProblem(w, vital.BadRequest(err.Error()))
 			return
 		}
@@ -625,12 +565,6 @@ func main() {
 | `WithTracerProvider` | `trace.TracerProvider` | `otel.GetTracerProvider()` | Custom tracer provider |
 | `WithMeterProvider` | `metric.MeterProvider` | `otel.GetMeterProvider()` | Custom meter provider |
 | `WithPropagator` | `propagation.TextMapPropagator` | `propagation.TraceContext{}` | Custom propagator |
-
-### Body Decode Options
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `WithMaxBodySize` | `int64` | 1MB | Maximum request body size |
 
 ### Logger Options
 
