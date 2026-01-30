@@ -94,10 +94,10 @@ func TestProblemDetail_MarshalJSON(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// GIVEN: a problem detail structure
+			// given: a problem detail structure
 			problem := tt.problem
 
-			// WHEN: marshaling to JSON
+			// when: marshaling to JSON
 			data, err := json.Marshal(problem)
 			if err != nil {
 				t.Fatalf("failed to marshal problem detail: %v", err)
@@ -110,7 +110,7 @@ func TestProblemDetail_MarshalJSON(t *testing.T) {
 				t.Fatalf("failed to unmarshal result: %v", err)
 			}
 
-			// THEN: all expected fields should be present with correct values
+			// then: all expected fields should be present with correct values
 			for key, expectedValue := range tt.expected {
 				actualValue, exists := result[key]
 				if !exists {
@@ -139,15 +139,15 @@ func TestMarshalJSON_ReservedKeyError(t *testing.T) {
 
 	for _, key := range reservedKeys {
 		t.Run(key, func(t *testing.T) {
-			// GIVEN: a problem detail with a reserved key as extension
+			// given: a problem detail with a reserved key as extension
 			problem := vital.NewProblemDetail(http.StatusBadRequest, "Bad Request",
 				vital.WithExtension(key, "value"),
 			)
 
-			// WHEN: marshaling to JSON
+			// when: marshaling to JSON
 			_, err := json.Marshal(problem)
 
-			// THEN: it should return an error
+			// then: it should return an error
 			if err == nil {
 				t.Errorf("expected error for reserved key %q, but got nil", key)
 			}
@@ -160,126 +160,133 @@ func TestMarshalJSON_ReservedKeyError(t *testing.T) {
 }
 
 func TestNewProblemDetail(t *testing.T) {
-	// GIVEN: a status code and title
-	status := http.StatusNotFound
-	title := "Resource Not Found"
+	t.Run("creates with status and title", func(t *testing.T) {
+		// given: a status code and title
+		status := http.StatusNotFound
+		title := "Resource Not Found"
 
-	// WHEN: creating a new problem detail
-	problem := vital.NewProblemDetail(status, title)
+		// when: creating a new problem detail
+		problem := vital.NewProblemDetail(status, title)
 
-	// THEN: it should have the correct status and title
-	if problem.Status != http.StatusNotFound {
-		t.Errorf("expected status %d, got %d", http.StatusNotFound, problem.Status)
-	}
+		// then: it should have the correct status and title
+		if problem.Status != http.StatusNotFound {
+			t.Errorf("expected status %d, got %d", http.StatusNotFound, problem.Status)
+		}
 
-	if problem.Title != "Resource Not Found" {
-		t.Errorf("expected title %q, got %q", "Resource Not Found", problem.Title)
-	}
+		if problem.Title != "Resource Not Found" {
+			t.Errorf("expected title %q, got %q", "Resource Not Found", problem.Title)
+		}
+	})
+
+	t.Run("creates with options", func(t *testing.T) {
+		// given: options for a problem detail
+
+		// when: creating a new problem detail with options
+		problem := vital.NewProblemDetail(http.StatusBadRequest, "Bad Request",
+			vital.WithType("https://example.com/problems/invalid-data"),
+			vital.WithDetail("The provided data was invalid"),
+			vital.WithInstance("/api/items/42"),
+			vital.WithExtension("field", "email"),
+			vital.WithExtension("reason", "invalid format"),
+		)
+
+		// then: all fields should be set correctly
+		if problem.Type != "https://example.com/problems/invalid-data" {
+			t.Errorf("expected type %q, got %q", "https://example.com/problems/invalid-data", problem.Type)
+		}
+
+		if problem.Detail != "The provided data was invalid" {
+			t.Errorf("expected detail %q, got %q", "The provided data was invalid", problem.Detail)
+		}
+
+		if problem.Instance != "/api/items/42" {
+			t.Errorf("expected instance %q, got %q", "/api/items/42", problem.Instance)
+		}
+
+		if problem.Extensions["field"] != "email" {
+			t.Errorf("expected extension field=email, got %v", problem.Extensions["field"])
+		}
+
+		if problem.Extensions["reason"] != "invalid format" {
+			t.Errorf("expected extension reason='invalid format', got %v", problem.Extensions["reason"])
+		}
+	})
 }
 
-func TestNewProblemDetail_WithOptions(t *testing.T) {
-	// GIVEN: options for a problem detail
-	// WHEN: creating a new problem detail with options
-	problem := vital.NewProblemDetail(http.StatusBadRequest, "Bad Request",
-		vital.WithType("https://example.com/problems/invalid-data"),
-		vital.WithDetail("The provided data was invalid"),
-		vital.WithInstance("/api/items/42"),
-		vital.WithExtension("field", "email"),
-		vital.WithExtension("reason", "invalid format"),
-	)
+func TestWithExtension(t *testing.T) {
+	t.Run("allows non-reserved keys", func(t *testing.T) {
+		// given: a problem detail with non-reserved extension keys
+		problem := vital.NewProblemDetail(http.StatusBadRequest, "Bad Request",
+			vital.WithExtension("custom_field", "value"),
+			vital.WithExtension("error_code", 123),
+		)
 
-	// THEN: all fields should be set correctly
-	if problem.Type != "https://example.com/problems/invalid-data" {
-		t.Errorf("expected type %q, got %q", "https://example.com/problems/invalid-data", problem.Type)
-	}
+		// when: marshaling to JSON
+		data, err := json.Marshal(problem)
+		// then: it should succeed and extensions should be present
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 
-	if problem.Detail != "The provided data was invalid" {
-		t.Errorf("expected detail %q, got %q", "The provided data was invalid", problem.Detail)
-	}
+		var result map[string]any
 
-	if problem.Instance != "/api/items/42" {
-		t.Errorf("expected instance %q, got %q", "/api/items/42", problem.Instance)
-	}
+		err = json.Unmarshal(data, &result)
+		if err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
 
-	if problem.Extensions["field"] != "email" {
-		t.Errorf("expected extension field=email, got %v", problem.Extensions["field"])
-	}
+		if result["custom_field"] != "value" {
+			t.Errorf("expected custom_field=value, got %v", result["custom_field"])
+		}
 
-	if problem.Extensions["reason"] != "invalid format" {
-		t.Errorf("expected extension reason='invalid format', got %v", problem.Extensions["reason"])
-	}
-}
-
-func TestWithExtension_AllowsNonReservedKeys(t *testing.T) {
-	// GIVEN: a problem detail with non-reserved extension keys
-	problem := vital.NewProblemDetail(http.StatusBadRequest, "Bad Request",
-		vital.WithExtension("custom_field", "value"),
-		vital.WithExtension("error_code", 123),
-	)
-
-	// WHEN: marshaling to JSON
-	data, err := json.Marshal(problem)
-	// THEN: it should succeed and extensions should be present
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	var result map[string]any
-
-	err = json.Unmarshal(data, &result)
-	if err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-
-	if result["custom_field"] != "value" {
-		t.Errorf("expected custom_field=value, got %v", result["custom_field"])
-	}
-
-	if result["error_code"] != float64(123) {
-		t.Errorf("expected error_code=123, got %v", result["error_code"])
-	}
+		if result["error_code"] != float64(123) {
+			t.Errorf("expected error_code=123, got %v", result["error_code"])
+		}
+	})
 }
 
 func TestRespondProblem(t *testing.T) {
-	// GIVEN: a problem detail with type and instance
-	problem := vital.BadRequest("Invalid email format",
-		vital.WithType("https://example.com/problems/validation"),
-		vital.WithInstance("/api/users"),
-	)
+	t.Run("returns correct status code and content type", func(t *testing.T) {
+		// given: a problem detail with type and instance
+		problem := vital.BadRequest("Invalid email format",
+			vital.WithType("https://example.com/problems/validation"),
+			vital.WithInstance("/api/users"),
+		)
 
-	recorder := httptest.NewRecorder()
+		recorder := httptest.NewRecorder()
 
-	// WHEN: responding with the problem detail
-	vital.RespondProblem(context.Background(), recorder, problem)
+		// when: responding with the problem detail
+		vital.RespondProblem(context.Background(), recorder, problem)
 
-	// THEN: it should return the correct status code and content type
-	if recorder.Code != http.StatusBadRequest {
-		t.Errorf("expected status code %d, got %d", http.StatusBadRequest, recorder.Code)
-	}
+		// then: it should return the correct status code and content type
+		if recorder.Code != http.StatusBadRequest {
+			t.Errorf("expected status code %d, got %d", http.StatusBadRequest, recorder.Code)
+		}
 
-	contentType := recorder.Header().Get("Content-Type")
-	if contentType != "application/problem+json" {
-		t.Errorf("expected content type %q, got %q", "application/problem+json", contentType)
-	}
+		contentType := recorder.Header().Get("Content-Type")
+		if contentType != "application/problem+json" {
+			t.Errorf("expected content type %q, got %q", "application/problem+json", contentType)
+		}
 
-	var result map[string]any
+		var result map[string]any
 
-	err := json.Unmarshal(recorder.Body.Bytes(), &result)
-	if err != nil {
-		t.Fatalf("failed to unmarshal response: %v", err)
-	}
+		err := json.Unmarshal(recorder.Body.Bytes(), &result)
+		if err != nil {
+			t.Fatalf("failed to unmarshal response: %v", err)
+		}
 
-	if result["status"] != float64(400) {
-		t.Errorf("expected status 400, got %v", result["status"])
-	}
+		if result["status"] != float64(400) {
+			t.Errorf("expected status 400, got %v", result["status"])
+		}
 
-	if result["title"] != "Bad Request" {
-		t.Errorf("expected title 'Bad Request', got %v", result["title"])
-	}
+		if result["title"] != "Bad Request" {
+			t.Errorf("expected title 'Bad Request', got %v", result["title"])
+		}
 
-	if result["detail"] != "Invalid email format" {
-		t.Errorf("expected detail 'Invalid email format', got %v", result["detail"])
-	}
+		if result["detail"] != "Invalid email format" {
+			t.Errorf("expected detail 'Invalid email format', got %v", result["detail"])
+		}
+	})
 }
 
 func TestCommonProblemConstructors(t *testing.T) {
@@ -359,13 +366,13 @@ func TestCommonProblemConstructors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// GIVEN: a detail message
+			// given: a detail message
 			detail := "test detail message"
 
-			// WHEN: using the constructor function
+			// when: using the constructor function
 			problem := tt.constructor(detail)
 
-			// THEN: it should create a problem with the correct status, title, and detail
+			// then: it should create a problem with the correct status, title, and detail
 			if problem.Status != tt.expectedStatus {
 				t.Errorf("expected status %d, got %d", tt.expectedStatus, problem.Status)
 			}
@@ -382,38 +389,41 @@ func TestCommonProblemConstructors(t *testing.T) {
 }
 
 func TestCommonProblemConstructors_WithOptions(t *testing.T) {
-	// GIVEN: a constructor with additional options
-	// WHEN: creating a problem with options
-	problem := vital.NotFound("resource not found",
-		vital.WithType("https://example.com/errors/not-found"),
-		vital.WithInstance("/api/users/123"),
-		vital.WithExtension("resource_type", "user"),
-	)
+	t.Run("accepts options", func(t *testing.T) {
+		// given: a constructor with additional options
 
-	// THEN: all fields should be set correctly
-	if problem.Status != http.StatusNotFound {
-		t.Errorf("expected status %d, got %d", http.StatusNotFound, problem.Status)
-	}
+		// when: creating a problem with options
+		problem := vital.NotFound("resource not found",
+			vital.WithType("https://example.com/errors/not-found"),
+			vital.WithInstance("/api/users/123"),
+			vital.WithExtension("resource_type", "user"),
+		)
 
-	if problem.Title != "Not Found" {
-		t.Errorf("expected title %q, got %q", "Not Found", problem.Title)
-	}
+		// then: all fields should be set correctly
+		if problem.Status != http.StatusNotFound {
+			t.Errorf("expected status %d, got %d", http.StatusNotFound, problem.Status)
+		}
 
-	if problem.Detail != "resource not found" {
-		t.Errorf("expected detail %q, got %q", "resource not found", problem.Detail)
-	}
+		if problem.Title != "Not Found" {
+			t.Errorf("expected title %q, got %q", "Not Found", problem.Title)
+		}
 
-	if problem.Type != "https://example.com/errors/not-found" {
-		t.Errorf("expected type %q, got %q", "https://example.com/errors/not-found", problem.Type)
-	}
+		if problem.Detail != "resource not found" {
+			t.Errorf("expected detail %q, got %q", "resource not found", problem.Detail)
+		}
 
-	if problem.Instance != "/api/users/123" {
-		t.Errorf("expected instance %q, got %q", "/api/users/123", problem.Instance)
-	}
+		if problem.Type != "https://example.com/errors/not-found" {
+			t.Errorf("expected type %q, got %q", "https://example.com/errors/not-found", problem.Type)
+		}
 
-	if problem.Extensions["resource_type"] != "user" {
-		t.Errorf("expected extension resource_type=user, got %v", problem.Extensions["resource_type"])
-	}
+		if problem.Instance != "/api/users/123" {
+			t.Errorf("expected instance %q, got %q", "/api/users/123", problem.Instance)
+		}
+
+		if problem.Extensions["resource_type"] != "user" {
+			t.Errorf("expected extension resource_type=user, got %v", problem.Extensions["resource_type"])
+		}
+	})
 }
 
 // deepEqual compares two values, handling type conversions for JSON unmarshaling.

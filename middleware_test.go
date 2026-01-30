@@ -67,7 +67,7 @@ func TestBasicAuth(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// GIVEN: a request with or without credentials
+			// given: a request with or without credentials
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 
 			if tt.username != "" || tt.password != "" {
@@ -78,10 +78,10 @@ func TestBasicAuth(t *testing.T) {
 
 			rec := httptest.NewRecorder()
 
-			// WHEN: the protected handler processes the request
+			// when: the protected handler processes the request
 			protectedHandler.ServeHTTP(rec, req)
 
-			// THEN: it should return the expected status and headers
+			// then: it should return the expected status and headers
 			if rec.Code != tt.expectedStatus {
 				t.Errorf("expected status %d, got %d", tt.expectedStatus, rec.Code)
 			}
@@ -96,210 +96,214 @@ func TestBasicAuth(t *testing.T) {
 			}
 		})
 	}
-}
 
-func TestBasicAuth_DefaultRealm(t *testing.T) {
-	// GIVEN: basic auth middleware with empty realm
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+	t.Run("uses default realm when empty", func(t *testing.T) {
+		// given: basic auth middleware with empty realm
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+
+		middleware := vital.BasicAuth("user", "pass", "")
+		protectedHandler := middleware(handler)
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+
+		// when: accessing without credentials
+		protectedHandler.ServeHTTP(rec, req)
+
+		// then: it should use the default realm "Restricted"
+		authHeader := rec.Header().Get("WWW-Authenticate")
+		if !strings.Contains(authHeader, "Restricted") {
+			t.Errorf("expected default realm 'Restricted', got %q", authHeader)
+		}
 	})
-
-	middleware := vital.BasicAuth("user", "pass", "")
-	protectedHandler := middleware(handler)
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-
-	// WHEN: accessing without credentials
-	protectedHandler.ServeHTTP(rec, req)
-
-	// THEN: it should use the default realm "Restricted"
-	authHeader := rec.Header().Get("WWW-Authenticate")
-	if !strings.Contains(authHeader, "Restricted") {
-		t.Errorf("expected default realm 'Restricted', got %q", authHeader)
-	}
 }
 
 func TestRequestLogger(t *testing.T) {
-	// GIVEN: a logger and handler that returns 201
-	var buf bytes.Buffer
+	t.Run("logs all expected fields", func(t *testing.T) {
+		// given: a logger and handler that returns 201
+		var buf bytes.Buffer
 
-	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
+		logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}))
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte("created"))
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte("created"))
+		})
+
+		middleware := vital.RequestLogger(logger)
+		loggedHandler := middleware(handler)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/users", nil)
+		req.Header.Set("User-Agent", "test-agent/1.0")
+
+		rec := httptest.NewRecorder()
+
+		// when: the handler processes the request
+		loggedHandler.ServeHTTP(rec, req)
+
+		// then: it should log all expected fields
+		logOutput := buf.String()
+
+		expectedFields := []string{
+			`"method":"POST"`,
+			`"path":"/api/users"`,
+			`"status":201`,
+			`"user_agent":"test-agent/1.0"`,
+			`"duration"`,
+			`"remote_addr"`,
+		}
+
+		for _, field := range expectedFields {
+			if !strings.Contains(logOutput, field) {
+				t.Errorf("expected log to contain %q, got: %s", field, logOutput)
+			}
+		}
 	})
 
-	middleware := vital.RequestLogger(logger)
-	loggedHandler := middleware(handler)
+	t.Run("captures status code", func(t *testing.T) {
+		var buf bytes.Buffer
 
-	req := httptest.NewRequest(http.MethodPost, "/api/users", nil)
-	req.Header.Set("User-Agent", "test-agent/1.0")
+		logger := slog.New(slog.NewJSONHandler(&buf, nil))
 
-	rec := httptest.NewRecorder()
-
-	// WHEN: the handler processes the request
-	loggedHandler.ServeHTTP(rec, req)
-
-	// THEN: it should log all expected fields
-	logOutput := buf.String()
-
-	expectedFields := []string{
-		`"method":"POST"`,
-		`"path":"/api/users"`,
-		`"status":201`,
-		`"user_agent":"test-agent/1.0"`,
-		`"duration"`,
-		`"remote_addr"`,
-	}
-
-	for _, field := range expectedFields {
-		if !strings.Contains(logOutput, field) {
-			t.Errorf("expected log to contain %q, got: %s", field, logOutput)
+		tests := []struct {
+			name       string
+			statusCode int
+		}{
+			{"status 200", http.StatusOK},
+			{"status 404", http.StatusNotFound},
+			{"status 500", http.StatusInternalServerError},
 		}
-	}
-}
 
-func TestRequestLogger_CapturesStatusCode(t *testing.T) {
-	var buf bytes.Buffer
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				// given: a handler that returns a specific status code
+				buf.Reset()
 
-	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(tt.statusCode)
+				})
 
-	tests := []struct {
-		name       string
-		statusCode int
-	}{
-		{"status 200", http.StatusOK},
-		{"status 404", http.StatusNotFound},
-		{"status 500", http.StatusInternalServerError},
-	}
+				middleware := vital.RequestLogger(logger)
+				loggedHandler := middleware(handler)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// GIVEN: a handler that returns a specific status code
-			buf.Reset()
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
+				rec := httptest.NewRecorder()
 
-			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(tt.statusCode)
+				// when: the handler processes the request
+				loggedHandler.ServeHTTP(rec, req)
+
+				// then: it should log the status code and capture it in the response
+				logOutput := buf.String()
+
+				if !strings.Contains(logOutput, `"status"`) {
+					t.Errorf("expected log to contain 'status' field, got: %s", logOutput)
+				}
+
+				if rec.Code != tt.statusCode {
+					t.Errorf("expected response status %d, got %d", tt.statusCode, rec.Code)
+				}
 			})
-
-			middleware := vital.RequestLogger(logger)
-			loggedHandler := middleware(handler)
-
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
-			rec := httptest.NewRecorder()
-
-			// WHEN: the handler processes the request
-			loggedHandler.ServeHTTP(rec, req)
-
-			// THEN: it should log the status code and capture it in the response
-			logOutput := buf.String()
-
-			if !strings.Contains(logOutput, `"status"`) {
-				t.Errorf("expected log to contain 'status' field, got: %s", logOutput)
-			}
-
-			if rec.Code != tt.statusCode {
-				t.Errorf("expected response status %d, got %d", tt.statusCode, rec.Code)
-			}
-		})
-	}
+		}
+	})
 }
 
 func TestRecovery(t *testing.T) {
-	// GIVEN: a handler that panics
-	var buf bytes.Buffer
+	t.Run("recovers from panic", func(t *testing.T) {
+		// given: a handler that panics
+		var buf bytes.Buffer
 
-	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+		logger := slog.New(slog.NewJSONHandler(&buf, nil))
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		panic("something went wrong")
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			panic("something went wrong")
+		})
+
+		middleware := vital.Recovery(logger)
+		recoveredHandler := middleware(handler)
+
+		req := httptest.NewRequest(http.MethodGet, "/panic", nil)
+		rec := httptest.NewRecorder()
+
+		// when: the handler is called
+		recoveredHandler.ServeHTTP(rec, req)
+
+		// then: it should recover and return 500 with error logged
+		if rec.Code != http.StatusInternalServerError {
+			t.Errorf("expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+
+		logOutput := buf.String()
+		if !strings.Contains(logOutput, "panic recovered") {
+			t.Errorf("expected log to contain 'panic recovered', got: %s", logOutput)
+		}
+
+		if !strings.Contains(logOutput, "something went wrong") {
+			t.Errorf("expected log to contain panic message, got: %s", logOutput)
+		}
 	})
 
-	middleware := vital.Recovery(logger)
-	recoveredHandler := middleware(handler)
+	t.Run("normal execution", func(t *testing.T) {
+		// given: a handler that executes normally without panic
+		var buf bytes.Buffer
 
-	req := httptest.NewRequest(http.MethodGet, "/panic", nil)
-	rec := httptest.NewRecorder()
+		logger := slog.New(slog.NewJSONHandler(&buf, nil))
 
-	// WHEN: the handler is called
-	recoveredHandler.ServeHTTP(rec, req)
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		})
 
-	// THEN: it should recover and return 500 with error logged
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, rec.Code)
-	}
+		middleware := vital.Recovery(logger)
+		recoveredHandler := middleware(handler)
 
-	logOutput := buf.String()
-	if !strings.Contains(logOutput, "panic recovered") {
-		t.Errorf("expected log to contain 'panic recovered', got: %s", logOutput)
-	}
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
 
-	if !strings.Contains(logOutput, "something went wrong") {
-		t.Errorf("expected log to contain panic message, got: %s", logOutput)
-	}
-}
+		// when: the handler is called
+		recoveredHandler.ServeHTTP(rec, req)
 
-func TestRecovery_NormalExecution(t *testing.T) {
-	// GIVEN: a handler that executes normally without panic
-	var buf bytes.Buffer
+		// then: it should execute normally without logging
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
+		}
 
-	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+		if rec.Body.String() != "ok" {
+			t.Errorf("expected body 'ok', got %q", rec.Body.String())
+		}
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
+		if buf.Len() > 0 {
+			t.Errorf("expected no log output, got: %s", buf.String())
+		}
 	})
-
-	middleware := vital.Recovery(logger)
-	recoveredHandler := middleware(handler)
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-
-	// WHEN: the handler is called
-	recoveredHandler.ServeHTTP(rec, req)
-
-	// THEN: it should execute normally without logging
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
-	}
-
-	if rec.Body.String() != "ok" {
-		t.Errorf("expected body 'ok', got %q", rec.Body.String())
-	}
-
-	if buf.Len() > 0 {
-		t.Errorf("expected no log output, got: %s", buf.String())
-	}
 }
 
 func TestGetTraceID(t *testing.T) {
 	t.Run("returns trace ID from context", func(t *testing.T) {
-		// GIVEN: a context with a trace ID
+		// given: a context with a trace ID
 		expectedID := "4bf92f3577b34da6a3ce929d0e0e4736"
 		ctx := context.WithValue(context.Background(), vital.TraceIDKey, expectedID)
 
-		// WHEN: getting the trace ID
+		// when: getting the trace ID
 		traceID := vital.GetTraceID(ctx)
 
-		// THEN: it should return the trace ID from context
+		// then: it should return the trace ID from context
 		if traceID != expectedID {
 			t.Errorf("expected %q, got %q", expectedID, traceID)
 		}
 	})
 
 	t.Run("returns empty string when not in context", func(t *testing.T) {
-		// GIVEN: a context without a trace ID
+		// given: a context without a trace ID
 		ctx := context.Background()
 
-		// WHEN: getting the trace ID
+		// when: getting the trace ID
 		traceID := vital.GetTraceID(ctx)
 
-		// THEN: it should return an empty string
+		// then: it should return an empty string
 		if traceID != "" {
 			t.Errorf("expected empty string, got %q", traceID)
 		}

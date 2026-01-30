@@ -11,323 +11,330 @@ import (
 	"github.com/monkescience/vital"
 )
 
-func TestContextHandler_ExtractsContextValues(t *testing.T) {
-	// GIVEN: a context handler with a registered context key
-	var buf bytes.Buffer
+func TestContextHandler(t *testing.T) {
+	t.Run("extracts context values", func(t *testing.T) {
+		// given: a context handler with a registered context key
+		var buf bytes.Buffer
 
-	baseHandler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})
+		baseHandler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		})
 
-	testKey := vital.ContextKey{Name: "test_key"}
-	handler := vital.NewContextHandler(baseHandler, vital.WithContextKeys(testKey))
-	logger := slog.New(handler)
+		testKey := vital.ContextKey{Name: "test_key"}
+		handler := vital.NewContextHandler(baseHandler, vital.WithContextKeys(testKey))
+		logger := slog.New(handler)
 
-	ctx := context.WithValue(context.Background(), testKey, "test_value")
+		ctx := context.WithValue(context.Background(), testKey, "test_value")
 
-	// WHEN: logging with context
-	logger.InfoContext(ctx, "test message")
+		// when: logging with context
+		logger.InfoContext(ctx, "test message")
 
-	// THEN: the context value should be in the log output
-	var logEntry map[string]any
+		// then: the context value should be in the log output
+		var logEntry map[string]any
 
-	err := json.Unmarshal(buf.Bytes(), &logEntry)
-	if err != nil {
-		t.Fatalf("failed to parse log output: %v", err)
-	}
-
-	if logEntry["test_key"] != "test_value" {
-		t.Errorf("expected test_key='test_value', got %v", logEntry["test_key"])
-	}
-
-	if logEntry["msg"] != "test message" {
-		t.Errorf("expected msg='test message', got %v", logEntry["msg"])
-	}
-}
-
-func TestContextHandler_MultipleContextKeys(t *testing.T) {
-	// GIVEN: a context handler with multiple registered context keys
-	var buf bytes.Buffer
-
-	baseHandler := slog.NewJSONHandler(&buf, nil)
-
-	key1 := vital.ContextKey{Name: "key1"}
-	key2 := vital.ContextKey{Name: "key2"}
-	handler := vital.NewContextHandler(baseHandler, vital.WithContextKeys(key1, key2))
-	logger := slog.New(handler)
-
-	ctx := context.Background()
-	ctx = context.WithValue(ctx, key1, "value1")
-	ctx = context.WithValue(ctx, key2, "value2")
-
-	// WHEN: logging with context
-	logger.InfoContext(ctx, "test message")
-
-	// THEN: all context values should be in the log output
-	var logEntry map[string]any
-
-	err := json.Unmarshal(buf.Bytes(), &logEntry)
-	if err != nil {
-		t.Fatalf("failed to parse log output: %v", err)
-	}
-
-	if logEntry["key1"] != "value1" {
-		t.Errorf("expected key1='value1', got %v", logEntry["key1"])
-	}
-
-	if logEntry["key2"] != "value2" {
-		t.Errorf("expected key2='value2', got %v", logEntry["key2"])
-	}
-}
-
-func TestContextHandler_MissingContextValue(t *testing.T) {
-	// GIVEN: a context handler with a registered key but no value in context
-	var buf bytes.Buffer
-
-	baseHandler := slog.NewJSONHandler(&buf, nil)
-
-	missingKey := vital.ContextKey{Name: "missing_key"}
-	handler := vital.NewContextHandler(baseHandler, vital.WithContextKeys(missingKey))
-	logger := slog.New(handler)
-
-	// WHEN: logging without the context value
-	logger.InfoContext(context.Background(), "test message")
-
-	// THEN: the missing key should not be in the log
-	var logEntry map[string]any
-
-	err := json.Unmarshal(buf.Bytes(), &logEntry)
-	if err != nil {
-		t.Fatalf("failed to parse log output: %v", err)
-	}
-
-	if _, exists := logEntry["missing_key"]; exists {
-		t.Error("expected missing_key to not be in log output")
-	}
-}
-
-func TestContextHandler_WithAttrs(t *testing.T) {
-	// GIVEN: a context handler with added attributes
-	var buf bytes.Buffer
-
-	baseHandler := slog.NewJSONHandler(&buf, nil)
-	handler := vital.NewContextHandler(baseHandler)
-	logger := slog.New(handler)
-
-	loggerWithAttrs := logger.With(slog.String("attr1", "value1"))
-
-	// WHEN: logging with the modified logger
-	loggerWithAttrs.Info("test message")
-
-	// THEN: the attribute should be in the log output
-	var logEntry map[string]any
-
-	err := json.Unmarshal(buf.Bytes(), &logEntry)
-	if err != nil {
-		t.Fatalf("failed to parse log output: %v", err)
-	}
-
-	if logEntry["attr1"] != "value1" {
-		t.Errorf("expected attr1='value1', got %v", logEntry["attr1"])
-	}
-}
-
-func TestContextHandler_WithGroup(t *testing.T) {
-	// GIVEN: a context handler with a group
-	var buf bytes.Buffer
-
-	baseHandler := slog.NewJSONHandler(&buf, nil)
-	handler := vital.NewContextHandler(baseHandler)
-	logger := slog.New(handler)
-
-	loggerWithGroup := logger.WithGroup("group1")
-
-	// WHEN: logging with the grouped logger
-	loggerWithGroup.Info("test message", slog.String("key", "value"))
-
-	// THEN: the group should be created in the log output
-	var logEntry map[string]any
-
-	err := json.Unmarshal(buf.Bytes(), &logEntry)
-	if err != nil {
-		t.Fatalf("failed to parse log output: %v", err)
-	}
-
-	group, ok := logEntry["group1"].(map[string]any)
-	if !ok {
-		t.Fatal("expected group1 to be a map")
-	}
-
-	if group["key"] != "value" {
-		t.Errorf("expected group1.key='value', got %v", group["key"])
-	}
-}
-
-func TestContextHandler_AvoidNesting(t *testing.T) {
-	// GIVEN: a context handler wrapping another context handler
-	baseHandler := slog.NewJSONHandler(&bytes.Buffer{}, nil)
-	handler1 := vital.NewContextHandler(baseHandler)
-
-	// WHEN: wrapping the context handler again
-	handler2 := vital.NewContextHandler(handler1)
-
-	// THEN: it should unwrap and use the original base handler
-	if handler2.Unwrap() != baseHandler {
-		t.Error("expected handler2 to unwrap handler1 and use the base handler")
-	}
-}
-
-func TestContextHandler_Enabled(t *testing.T) {
-	// GIVEN: a context handler with Warn level
-	baseHandler := slog.NewJSONHandler(&bytes.Buffer{}, &slog.HandlerOptions{
-		Level: slog.LevelWarn,
-	})
-	handler := vital.NewContextHandler(baseHandler)
-
-	ctx := context.Background()
-
-	// WHEN: checking if different log levels are enabled
-	// THEN: only Warn and above should be enabled
-	if handler.Enabled(ctx, slog.LevelInfo) {
-		t.Error("expected LevelInfo to be disabled when handler level is Warn")
-	}
-
-	if !handler.Enabled(ctx, slog.LevelWarn) {
-		t.Error("expected LevelWarn to be enabled")
-	}
-
-	if !handler.Enabled(ctx, slog.LevelError) {
-		t.Error("expected LevelError to be enabled")
-	}
-}
-
-func TestRegistry_Register(t *testing.T) {
-	// GIVEN: a new registry
-	registry := vital.NewRegistry()
-
-	testKey := vital.ContextKey{Name: "test_key"}
-
-	// WHEN: registering a key
-	registry.Register(testKey)
-
-	// THEN: the key should be in the registry
-	keys := registry.Keys()
-	found := false
-
-	for _, key := range keys {
-		if key.Name == testKey.Name {
-			found = true
-
-			break
+		err := json.Unmarshal(buf.Bytes(), &logEntry)
+		if err != nil {
+			t.Fatalf("failed to parse log output: %v", err)
 		}
-	}
 
-	if !found {
-		t.Error("expected test_key to be registered")
-	}
+		if logEntry["test_key"] != "test_value" {
+			t.Errorf("expected test_key='test_value', got %v", logEntry["test_key"])
+		}
+
+		if logEntry["msg"] != "test message" {
+			t.Errorf("expected msg='test message', got %v", logEntry["msg"])
+		}
+	})
+
+	t.Run("handles multiple context keys", func(t *testing.T) {
+		// given: a context handler with multiple registered context keys
+		var buf bytes.Buffer
+
+		baseHandler := slog.NewJSONHandler(&buf, nil)
+
+		key1 := vital.ContextKey{Name: "key1"}
+		key2 := vital.ContextKey{Name: "key2"}
+		handler := vital.NewContextHandler(baseHandler, vital.WithContextKeys(key1, key2))
+		logger := slog.New(handler)
+
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, key1, "value1")
+		ctx = context.WithValue(ctx, key2, "value2")
+
+		// when: logging with context
+		logger.InfoContext(ctx, "test message")
+
+		// then: all context values should be in the log output
+		var logEntry map[string]any
+
+		err := json.Unmarshal(buf.Bytes(), &logEntry)
+		if err != nil {
+			t.Fatalf("failed to parse log output: %v", err)
+		}
+
+		if logEntry["key1"] != "value1" {
+			t.Errorf("expected key1='value1', got %v", logEntry["key1"])
+		}
+
+		if logEntry["key2"] != "value2" {
+			t.Errorf("expected key2='value2', got %v", logEntry["key2"])
+		}
+	})
+
+	t.Run("omits missing context value", func(t *testing.T) {
+		// given: a context handler with a registered key but no value in context
+		var buf bytes.Buffer
+
+		baseHandler := slog.NewJSONHandler(&buf, nil)
+
+		missingKey := vital.ContextKey{Name: "missing_key"}
+		handler := vital.NewContextHandler(baseHandler, vital.WithContextKeys(missingKey))
+		logger := slog.New(handler)
+
+		// when: logging without the context value
+		logger.InfoContext(context.Background(), "test message")
+
+		// then: the missing key should not be in the log
+		var logEntry map[string]any
+
+		err := json.Unmarshal(buf.Bytes(), &logEntry)
+		if err != nil {
+			t.Fatalf("failed to parse log output: %v", err)
+		}
+
+		if _, exists := logEntry["missing_key"]; exists {
+			t.Error("expected missing_key to not be in log output")
+		}
+	})
+
+	t.Run("includes added attributes", func(t *testing.T) {
+		// given: a context handler with added attributes
+		var buf bytes.Buffer
+
+		baseHandler := slog.NewJSONHandler(&buf, nil)
+		handler := vital.NewContextHandler(baseHandler)
+		logger := slog.New(handler)
+
+		loggerWithAttrs := logger.With(slog.String("attr1", "value1"))
+
+		// when: logging with the modified logger
+		loggerWithAttrs.Info("test message")
+
+		// then: the attribute should be in the log output
+		var logEntry map[string]any
+
+		err := json.Unmarshal(buf.Bytes(), &logEntry)
+		if err != nil {
+			t.Fatalf("failed to parse log output: %v", err)
+		}
+
+		if logEntry["attr1"] != "value1" {
+			t.Errorf("expected attr1='value1', got %v", logEntry["attr1"])
+		}
+	})
+
+	t.Run("creates groups", func(t *testing.T) {
+		// given: a context handler with a group
+		var buf bytes.Buffer
+
+		baseHandler := slog.NewJSONHandler(&buf, nil)
+		handler := vital.NewContextHandler(baseHandler)
+		logger := slog.New(handler)
+
+		loggerWithGroup := logger.WithGroup("group1")
+
+		// when: logging with the grouped logger
+		loggerWithGroup.Info("test message", slog.String("key", "value"))
+
+		// then: the group should be created in the log output
+		var logEntry map[string]any
+
+		err := json.Unmarshal(buf.Bytes(), &logEntry)
+		if err != nil {
+			t.Fatalf("failed to parse log output: %v", err)
+		}
+
+		group, ok := logEntry["group1"].(map[string]any)
+		if !ok {
+			t.Fatal("expected group1 to be a map")
+		}
+
+		if group["key"] != "value" {
+			t.Errorf("expected group1.key='value', got %v", group["key"])
+		}
+	})
+
+	t.Run("avoids nesting when wrapping context handler", func(t *testing.T) {
+		// given: a context handler wrapping another context handler
+		baseHandler := slog.NewJSONHandler(&bytes.Buffer{}, nil)
+		handler1 := vital.NewContextHandler(baseHandler)
+
+		// when: wrapping the context handler again
+		handler2 := vital.NewContextHandler(handler1)
+
+		// then: it should unwrap and use the original base handler
+		if handler2.Unwrap() != baseHandler {
+			t.Error("expected handler2 to unwrap handler1 and use the base handler")
+		}
+	})
+
+	t.Run("respects log level", func(t *testing.T) {
+		// given: a context handler with Warn level
+		baseHandler := slog.NewJSONHandler(&bytes.Buffer{}, &slog.HandlerOptions{
+			Level: slog.LevelWarn,
+		})
+		handler := vital.NewContextHandler(baseHandler)
+
+		ctx := context.Background()
+
+		// when: checking if different log levels are enabled
+
+		// then: only Warn and above should be enabled
+		if handler.Enabled(ctx, slog.LevelInfo) {
+			t.Error("expected LevelInfo to be disabled when handler level is Warn")
+		}
+
+		if !handler.Enabled(ctx, slog.LevelWarn) {
+			t.Error("expected LevelWarn to be enabled")
+		}
+
+		if !handler.Enabled(ctx, slog.LevelError) {
+			t.Error("expected LevelError to be enabled")
+		}
+	})
+
+	t.Run("handles different value types", func(t *testing.T) {
+		// given: a context handler with keys for different value types
+		var buf bytes.Buffer
+
+		baseHandler := slog.NewJSONHandler(&buf, nil)
+
+		stringKey := vital.ContextKey{Name: "string_val"}
+		intKey := vital.ContextKey{Name: "int_val"}
+		boolKey := vital.ContextKey{Name: "bool_val"}
+
+		handler := vital.NewContextHandler(baseHandler, vital.WithContextKeys(stringKey, intKey, boolKey))
+		logger := slog.New(handler)
+
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, stringKey, "hello")
+		ctx = context.WithValue(ctx, intKey, 42)
+		ctx = context.WithValue(ctx, boolKey, true)
+
+		// when: logging with context containing different value types
+		logger.InfoContext(ctx, "test message")
+
+		// then: all values should be correctly logged with their types
+		logOutput := buf.String()
+
+		if !strings.Contains(logOutput, `"string_val":"hello"`) {
+			t.Error("expected string_val to be in log output")
+		}
+
+		if !strings.Contains(logOutput, `"int_val":42`) {
+			t.Error("expected int_val to be in log output")
+		}
+
+		if !strings.Contains(logOutput, `"bool_val":true`) {
+			t.Error("expected bool_val to be in log output")
+		}
+	})
 }
 
-func TestRegistry_Keys(t *testing.T) {
-	// GIVEN: a registry with multiple keys
-	registry := vital.NewRegistry()
+func TestRegistry(t *testing.T) {
+	t.Run("registers keys", func(t *testing.T) {
+		// given: a new registry
+		registry := vital.NewRegistry()
 
-	key1 := vital.ContextKey{Name: "key1"}
-	key2 := vital.ContextKey{Name: "key2"}
+		testKey := vital.ContextKey{Name: "test_key"}
 
-	registry.Register(key1)
-	registry.Register(key2)
+		// when: registering a key
+		registry.Register(testKey)
 
-	// WHEN: getting all keys
-	keys := registry.Keys()
+		// then: the key should be in the registry
+		keys := registry.Keys()
+		found := false
 
-	// THEN: it should return all registered keys
-	if len(keys) != 2 {
-		t.Errorf("expected 2 keys, got %d", len(keys))
-	}
+		for _, key := range keys {
+			if key.Name == testKey.Name {
+				found = true
 
-	keyNames := make(map[string]bool)
-	for _, key := range keys {
-		keyNames[key.Name] = true
-	}
+				break
+			}
+		}
 
-	if !keyNames["key1"] || !keyNames["key2"] {
-		t.Error("expected both key1 and key2 to be in registry")
-	}
+		if !found {
+			t.Error("expected test_key to be registered")
+		}
+	})
+
+	t.Run("returns all registered keys", func(t *testing.T) {
+		// given: a registry with multiple keys
+		registry := vital.NewRegistry()
+
+		key1 := vital.ContextKey{Name: "key1"}
+		key2 := vital.ContextKey{Name: "key2"}
+
+		registry.Register(key1)
+		registry.Register(key2)
+
+		// when: getting all keys
+		keys := registry.Keys()
+
+		// then: it should return all registered keys
+		if len(keys) != 2 {
+			t.Errorf("expected 2 keys, got %d", len(keys))
+		}
+
+		keyNames := make(map[string]bool)
+		for _, key := range keys {
+			keyNames[key.Name] = true
+		}
+
+		if !keyNames["key1"] || !keyNames["key2"] {
+			t.Error("expected both key1 and key2 to be in registry")
+		}
+	})
 }
 
 func TestBuiltinKeys(t *testing.T) {
-	// WHEN: getting builtin keys
-	keys := vital.BuiltinKeys()
+	t.Run("includes all trace context keys", func(t *testing.T) {
+		// when: getting builtin keys
+		keys := vital.BuiltinKeys()
 
-	// THEN: all trace context keys should be included
-	expectedKeys := map[string]bool{
-		"trace_id":    false,
-		"span_id":     false,
-		"trace_flags": false,
-	}
-
-	for _, key := range keys {
-		if _, exists := expectedKeys[key.Name]; exists {
-			expectedKeys[key.Name] = true
+		// then: all trace context keys should be included
+		expectedKeys := map[string]bool{
+			"trace_id":    false,
+			"span_id":     false,
+			"trace_flags": false,
 		}
-	}
 
-	for keyName, found := range expectedKeys {
-		if !found {
-			t.Errorf("expected %s to be in builtin keys", keyName)
+		for _, key := range keys {
+			if _, exists := expectedKeys[key.Name]; exists {
+				expectedKeys[key.Name] = true
+			}
 		}
-	}
-}
 
-func TestContextHandler_DifferentValueTypes(t *testing.T) {
-	// GIVEN: a context handler with keys for different value types
-	var buf bytes.Buffer
-
-	baseHandler := slog.NewJSONHandler(&buf, nil)
-
-	stringKey := vital.ContextKey{Name: "string_val"}
-	intKey := vital.ContextKey{Name: "int_val"}
-	boolKey := vital.ContextKey{Name: "bool_val"}
-
-	handler := vital.NewContextHandler(baseHandler, vital.WithContextKeys(stringKey, intKey, boolKey))
-	logger := slog.New(handler)
-
-	ctx := context.Background()
-	ctx = context.WithValue(ctx, stringKey, "hello")
-	ctx = context.WithValue(ctx, intKey, 42)
-	ctx = context.WithValue(ctx, boolKey, true)
-
-	// WHEN: logging with context containing different value types
-	logger.InfoContext(ctx, "test message")
-
-	// THEN: all values should be correctly logged with their types
-	logOutput := buf.String()
-
-	if !strings.Contains(logOutput, `"string_val":"hello"`) {
-		t.Error("expected string_val to be in log output")
-	}
-
-	if !strings.Contains(logOutput, `"int_val":42`) {
-		t.Error("expected int_val to be in log output")
-	}
-
-	if !strings.Contains(logOutput, `"bool_val":true`) {
-		t.Error("expected bool_val to be in log output")
-	}
+		for keyName, found := range expectedKeys {
+			if !found {
+				t.Errorf("expected %s to be in builtin keys", keyName)
+			}
+		}
+	})
 }
 
 func TestNewHandlerFromConfig(t *testing.T) {
 	t.Run("returns error with empty log level", func(t *testing.T) {
-		// GIVEN: a config with empty level
+		// given: a config with empty level
 		cfg := vital.LogConfig{
 			Level:  "",
 			Format: "json",
 		}
 
-		// WHEN: creating a handler from config
+		// when: creating a handler from config
 		handler, err := vital.NewHandlerFromConfig(cfg)
 
-		// THEN: it should return an error
+		// then: it should return an error
 		if err == nil {
 			t.Error("expected error for empty log level")
 		}
@@ -338,16 +345,16 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("returns error with empty format", func(t *testing.T) {
-		// GIVEN: a config with empty format
+		// given: a config with empty format
 		cfg := vital.LogConfig{
 			Level:  "info",
 			Format: "",
 		}
 
-		// WHEN: creating a handler from config
+		// when: creating a handler from config
 		handler, err := vital.NewHandlerFromConfig(cfg)
 
-		// THEN: it should return an error
+		// then: it should return an error
 		if err == nil {
 			t.Error("expected error for empty format")
 		}
@@ -358,15 +365,15 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("creates handler with debug level", func(t *testing.T) {
-		// GIVEN: a config with debug level
+		// given: a config with debug level
 		cfg := vital.LogConfig{
 			Level:  "debug",
 			Format: "json",
 		}
 
-		// WHEN: creating a handler from config
+		// when: creating a handler from config
 		handler, err := vital.NewHandlerFromConfig(cfg)
-		// THEN: it should succeed and debug level should be enabled
+		// then: it should succeed and debug level should be enabled
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -377,15 +384,15 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("creates handler with info level", func(t *testing.T) {
-		// GIVEN: a config with info level
+		// given: a config with info level
 		cfg := vital.LogConfig{
 			Level:  "info",
 			Format: "json",
 		}
 
-		// WHEN: creating a handler from config
+		// when: creating a handler from config
 		handler, err := vital.NewHandlerFromConfig(cfg)
-		// THEN: it should succeed and info level should be enabled but debug should not
+		// then: it should succeed and info level should be enabled but debug should not
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -400,15 +407,15 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("creates handler with warn level", func(t *testing.T) {
-		// GIVEN: a config with warn level
+		// given: a config with warn level
 		cfg := vital.LogConfig{
 			Level:  "warn",
 			Format: "json",
 		}
 
-		// WHEN: creating a handler from config
+		// when: creating a handler from config
 		handler, err := vital.NewHandlerFromConfig(cfg)
-		// THEN: it should succeed and warn and error should be enabled, info and debug should not
+		// then: it should succeed and warn and error should be enabled, info and debug should not
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -427,15 +434,15 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("creates handler with error level", func(t *testing.T) {
-		// GIVEN: a config with error level
+		// given: a config with error level
 		cfg := vital.LogConfig{
 			Level:  "error",
 			Format: "json",
 		}
 
-		// WHEN: creating a handler from config
+		// when: creating a handler from config
 		handler, err := vital.NewHandlerFromConfig(cfg)
-		// THEN: it should succeed and only error level should be enabled
+		// then: it should succeed and only error level should be enabled
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -450,16 +457,16 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("returns error with invalid log level", func(t *testing.T) {
-		// GIVEN: a config with invalid level
+		// given: a config with invalid level
 		cfg := vital.LogConfig{
 			Level:  "invalid",
 			Format: "json",
 		}
 
-		// WHEN: creating a handler from config
+		// when: creating a handler from config
 		handler, err := vital.NewHandlerFromConfig(cfg)
 
-		// THEN: it should return an error
+		// then: it should return an error
 		if err == nil {
 			t.Error("expected error for invalid log level")
 		}
@@ -470,15 +477,15 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("creates handler with JSON format", func(t *testing.T) {
-		// GIVEN: a config with JSON format
+		// given: a config with JSON format
 		cfg := vital.LogConfig{
 			Level:  "info",
 			Format: "json",
 		}
 
-		// WHEN: creating a handler from config
+		// when: creating a handler from config
 		handler, err := vital.NewHandlerFromConfig(cfg)
-		// THEN: it should succeed and create a ContextHandler
+		// then: it should succeed and create a ContextHandler
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -490,15 +497,15 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("creates handler with text format", func(t *testing.T) {
-		// GIVEN: a config with text format
+		// given: a config with text format
 		cfg := vital.LogConfig{
 			Level:  "info",
 			Format: "text",
 		}
 
-		// WHEN: creating a handler from config
+		// when: creating a handler from config
 		handler, err := vital.NewHandlerFromConfig(cfg)
-		// THEN: it should succeed and create a ContextHandler
+		// then: it should succeed and create a ContextHandler
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -510,16 +517,16 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("returns error with invalid format", func(t *testing.T) {
-		// GIVEN: a config with invalid format
+		// given: a config with invalid format
 		cfg := vital.LogConfig{
 			Level:  "info",
 			Format: "invalid",
 		}
 
-		// WHEN: creating a handler from config
+		// when: creating a handler from config
 		handler, err := vital.NewHandlerFromConfig(cfg)
 
-		// THEN: it should return an error
+		// then: it should return an error
 		if err == nil {
 			t.Error("expected error for invalid format")
 		}
@@ -530,16 +537,16 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("creates handler with AddSource enabled", func(t *testing.T) {
-		// GIVEN: a config with AddSource enabled
+		// given: a config with AddSource enabled
 		cfg := vital.LogConfig{
 			Level:     "info",
 			Format:    "json",
 			AddSource: true,
 		}
 
-		// WHEN: creating a handler from config
+		// when: creating a handler from config
 		handler, err := vital.NewHandlerFromConfig(cfg)
-		// THEN: it should succeed and create a valid handler
+		// then: it should succeed and create a valid handler
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -551,7 +558,7 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("creates handler with context handler options", func(t *testing.T) {
-		// GIVEN: a config and context handler options
+		// given: a config and context handler options
 		cfg := vital.LogConfig{
 			Level:  "info",
 			Format: "json",
@@ -559,9 +566,9 @@ func TestNewHandlerFromConfig(t *testing.T) {
 
 		testKey := vital.ContextKey{Name: "custom_key"}
 
-		// WHEN: creating a handler with custom options
+		// when: creating a handler with custom options
 		handler, err := vital.NewHandlerFromConfig(cfg, vital.WithContextKeys(testKey))
-		// THEN: it should succeed and include the custom context keys
+		// then: it should succeed and include the custom context keys
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -589,15 +596,15 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("creates handler with builtin keys option", func(t *testing.T) {
-		// GIVEN: a config with builtin keys option
+		// given: a config with builtin keys option
 		cfg := vital.LogConfig{
 			Level:  "info",
 			Format: "json",
 		}
 
-		// WHEN: creating a handler with builtin keys
+		// when: creating a handler with builtin keys
 		handler, err := vital.NewHandlerFromConfig(cfg, vital.WithBuiltinKeys())
-		// THEN: it should succeed and include builtin keys
+		// then: it should succeed and include builtin keys
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

@@ -17,31 +17,31 @@ import (
 
 func TestNewServer(t *testing.T) {
 	t.Run("creates server with handler", func(t *testing.T) {
-		// GIVEN: a basic HTTP handler
+		// given: a basic HTTP handler
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		// WHEN: creating a new server with no options
+		// when: creating a new server with no options
 		server := vital.NewServer(handler)
 
-		// THEN: it should have the handler set
+		// then: it should have the handler set
 		if server.Handler == nil {
 			t.Error("expected handler to be set")
 		}
 	})
 
 	t.Run("configures port correctly", func(t *testing.T) {
-		// GIVEN: a handler and desired port
+		// given: a handler and desired port
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
 		expectedPort := 8080
 
-		// WHEN: creating a server with WithPort option
+		// when: creating a server with WithPort option
 		server := vital.NewServer(handler, vital.WithPort(expectedPort))
 
-		// THEN: it should set the address
+		// then: it should set the address
 		expectedAddr := fmt.Sprintf(":%d", expectedPort)
 		if server.Addr != expectedAddr {
 			t.Errorf("expected address %s, got %s", expectedAddr, server.Addr)
@@ -49,7 +49,7 @@ func TestNewServer(t *testing.T) {
 	})
 
 	t.Run("configures custom timeouts", func(t *testing.T) {
-		// GIVEN: a handler and custom timeout values
+		// given: a handler and custom timeout values
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
@@ -57,7 +57,7 @@ func TestNewServer(t *testing.T) {
 		customWrite := 15 * time.Second
 		customIdle := 60 * time.Second
 
-		// WHEN: creating a server with custom timeout options
+		// when: creating a server with custom timeout options
 		server := vital.NewServer(
 			handler,
 			vital.WithReadTimeout(customRead),
@@ -65,7 +65,7 @@ func TestNewServer(t *testing.T) {
 			vital.WithIdleTimeout(customIdle),
 		)
 
-		// THEN: it should use the custom timeout values (accessible via embedded http.Server)
+		// then: it should use the custom timeout values (accessible via embedded http.Server)
 		if server.ReadHeaderTimeout != customRead {
 			t.Errorf("expected ReadHeaderTimeout %v, got %v", customRead, server.ReadHeaderTimeout)
 		}
@@ -80,36 +80,36 @@ func TestNewServer(t *testing.T) {
 	})
 
 	t.Run("configures custom logger", func(t *testing.T) {
-		// GIVEN: a handler and custom logger
+		// given: a handler and custom logger
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
 		customLogger := slog.New(slog.DiscardHandler)
 
-		// WHEN: creating a server with WithLogger option
+		// when: creating a server with WithLogger option
 		server := vital.NewServer(handler, vital.WithLogger(customLogger))
 
-		// THEN: it should configure ErrorLog (accessible via embedded http.Server)
+		// then: it should configure ErrorLog (accessible via embedded http.Server)
 		if server.ErrorLog == nil {
 			t.Error("expected ErrorLog to be configured")
 		}
 	})
 
 	t.Run("applies multiple options", func(t *testing.T) {
-		// GIVEN: a handler and multiple configuration options
+		// given: a handler and multiple configuration options
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
 		port := 9000
 
-		// WHEN: creating a server with multiple options
+		// when: creating a server with multiple options
 		server := vital.NewServer(
 			handler,
 			vital.WithPort(port),
 			vital.WithShutdownTimeout(25*time.Second),
 		)
 
-		// THEN: port option should be applied
+		// then: port option should be applied
 		expectedAddr := fmt.Sprintf(":%d", port)
 		if server.Addr != expectedAddr {
 			t.Errorf("expected address %s, got %s", expectedAddr, server.Addr)
@@ -119,7 +119,7 @@ func TestNewServer(t *testing.T) {
 
 func TestServer_HTTP(t *testing.T) {
 	t.Run("starts and serves HTTP requests", func(t *testing.T) {
-		// GIVEN: an HTTP server on a specific port
+		// given: an HTTP server on a specific port
 		responseBody := "test response"
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -155,7 +155,7 @@ func TestServer_HTTP(t *testing.T) {
 			_ = server.Shutdown(ctx)
 		}()
 
-		// WHEN: making an HTTP request to the server
+		// when: making an HTTP request to the server
 		client := &http.Client{Timeout: 2 * time.Second}
 
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, serverURL, nil)
@@ -164,7 +164,7 @@ func TestServer_HTTP(t *testing.T) {
 		}
 
 		resp, err := client.Do(req)
-		// THEN: it should respond successfully
+		// then: it should respond successfully
 		if err != nil {
 			t.Fatalf("failed to make HTTP request: %v", err)
 		}
@@ -194,7 +194,7 @@ func TestServer_HTTP(t *testing.T) {
 
 func TestServer_Stop(t *testing.T) {
 	t.Run("gracefully shuts down server", func(t *testing.T) {
-		// GIVEN: a running HTTP server
+		// given: a running HTTP server
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
@@ -215,16 +215,16 @@ func TestServer_Stop(t *testing.T) {
 		serverURL := fmt.Sprintf("http://localhost:%d", port)
 		waitForServer(t, serverURL)
 
-		// WHEN: stopping the server
+		// when: stopping the server
 		err := server.Stop()
-		// THEN: it should shut down without error
+		// then: it should shut down without error
 		if err != nil {
 			t.Errorf("expected no error during shutdown, got: %v", err)
 		}
 	})
 
 	t.Run("respects shutdown timeout", func(t *testing.T) {
-		// GIVEN: a server with a short shutdown timeout and a slow endpoint
+		// given: a server with a short shutdown timeout and a slow endpoint
 		mux := http.NewServeMux()
 		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -250,12 +250,12 @@ func TestServer_Stop(t *testing.T) {
 		serverURL := fmt.Sprintf("http://localhost:%d/health", port)
 		waitForServer(t, serverURL)
 
-		// WHEN: stopping the server
+		// when: stopping the server
 		start := time.Now()
 		_ = server.Stop()
 		elapsed := time.Since(start)
 
-		// THEN: it should respect the shutdown timeout
+		// then: it should respect the shutdown timeout
 		// Allow some margin for timing variance
 		if elapsed > shortTimeout+500*time.Millisecond {
 			t.Errorf("shutdown took too long: %v (expected around %v)", elapsed, shortTimeout)
@@ -269,7 +269,7 @@ func TestServerIntegration_HTTP(t *testing.T) {
 	}
 
 	t.Run("full HTTP server lifecycle", func(t *testing.T) {
-		// GIVEN: an HTTP server with a test endpoint
+		// given: an HTTP server with a test endpoint
 		testPath := "/test"
 		testResponse := "integration test"
 
@@ -302,7 +302,7 @@ func TestServerIntegration_HTTP(t *testing.T) {
 		// Wait for server to be ready
 		waitForServer(t, fmt.Sprintf("http://localhost:%d%s", port, testPath))
 
-		// WHEN: making multiple requests to the server
+		// when: making multiple requests to the server
 		client := &http.Client{Timeout: 2 * time.Second}
 
 		for i := range 3 {
@@ -318,7 +318,7 @@ func TestServerIntegration_HTTP(t *testing.T) {
 				t.Fatalf("request %d failed: %v", i, err)
 			}
 
-			// THEN: all requests should succeed
+			// then: all requests should succeed
 			if resp.StatusCode != http.StatusOK {
 				_ = resp.Body.Close()
 				t.Errorf("request %d: expected status %d, got %d", i, http.StatusOK, resp.StatusCode)
@@ -344,7 +344,7 @@ func TestServerIntegration_HTTPS(t *testing.T) {
 	}
 
 	t.Run("full HTTPS server lifecycle", func(t *testing.T) {
-		// GIVEN: an HTTPS server with a test endpoint
+		// given: an HTTPS server with a test endpoint
 		testPath := "/secure"
 		testResponse := "secure response"
 
@@ -378,7 +378,7 @@ func TestServerIntegration_HTTPS(t *testing.T) {
 		// Wait for server to be ready
 		waitForServer(t, fmt.Sprintf("https://localhost:%d%s", port, testPath))
 
-		// WHEN: making HTTPS requests with certificate verification disabled
+		// when: making HTTPS requests with certificate verification disabled
 		client := &http.Client{
 			Timeout: 2 * time.Second,
 			Transport: &http.Transport{
@@ -402,7 +402,7 @@ func TestServerIntegration_HTTPS(t *testing.T) {
 
 		defer func() { _ = resp.Body.Close() }()
 
-		// THEN: the HTTPS request should succeed
+		// then: the HTTPS request should succeed
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("expected status %d, got %d", http.StatusOK, resp.StatusCode)
 		}
