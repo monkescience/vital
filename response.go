@@ -1,8 +1,10 @@
 package vital
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net/http"
 )
@@ -108,10 +110,14 @@ func (p *ProblemDetail) WithExtension(key string, value any) *ProblemDetail {
 
 // RespondProblem writes a ProblemDetail as an HTTP response.
 // It sets the appropriate content type and status code.
-func RespondProblem(w http.ResponseWriter, problem *ProblemDetail) {
+func RespondProblem(ctx context.Context, w http.ResponseWriter, problem *ProblemDetail) {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(problem.Status)
-	_ = json.NewEncoder(w).Encode(problem) //nolint:errchkjson
+
+	err := json.NewEncoder(w).Encode(problem)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to encode problem detail response", slog.Any("error", err))
+	}
 }
 
 // Common problem detail constructors for standard HTTP errors

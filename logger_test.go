@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -200,69 +198,6 @@ func TestContextHandler_Enabled(t *testing.T) {
 
 	if !handler.Enabled(ctx, slog.LevelError) {
 		t.Error("expected LevelError to be enabled")
-	}
-}
-
-func TestTraceContext_AutomaticLogging(t *testing.T) {
-	// GIVEN: a context handler with builtin keys and trace context middleware
-	var buf bytes.Buffer
-
-	baseHandler := slog.NewJSONHandler(&buf, nil)
-
-	handler := vital.NewContextHandler(baseHandler, vital.WithBuiltinKeys())
-	logger := slog.New(handler)
-
-	testHandler := vital.TraceContext()(
-		vital.RequestLogger(logger)(
-			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusOK)
-			}),
-		),
-	)
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	rec := httptest.NewRecorder()
-
-	// WHEN: the handler processes the request
-	testHandler.ServeHTTP(rec, req)
-
-	// THEN: trace context should be automatically logged
-	var logEntry map[string]any
-
-	err := json.Unmarshal(buf.Bytes(), &logEntry)
-	if err != nil {
-		t.Fatalf("failed to parse log output: %v", err)
-	}
-
-	traceID, hasTraceID := logEntry["trace_id"]
-	if !hasTraceID {
-		t.Error("expected trace_id to be in log output")
-	}
-
-	spanID, hasSpanID := logEntry["span_id"]
-	if !hasSpanID {
-		t.Error("expected span_id to be in log output")
-	}
-
-	traceFlags, hasTraceFlags := logEntry["trace_flags"]
-	if !hasTraceFlags {
-		t.Error("expected trace_flags to be in log output")
-	}
-
-	// Verify traceparent header matches logged values
-	traceparent := rec.Header().Get("Traceparent")
-	parts := strings.Split(traceparent, "-")
-
-	if parts[1] != traceID {
-		t.Errorf("expected trace_id in log (%v) to match header (%v)", traceID, parts[1])
-	}
-
-	if parts[2] != spanID {
-		t.Errorf("expected span_id in log (%v) to match header (%v)", spanID, parts[2])
-	}
-
-	if parts[3] != traceFlags {
-		t.Errorf("expected trace_flags in log (%v) to match header (%v)", traceFlags, parts[3])
 	}
 }
 

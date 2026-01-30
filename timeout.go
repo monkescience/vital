@@ -66,7 +66,7 @@ func Timeout(duration time.Duration) Middleware {
 					return
 				}
 
-				RespondProblem(w, ServiceUnavailable("request timeout exceeded"))
+				RespondProblem(ctx, w, ServiceUnavailable("request timeout exceeded"))
 			}
 		})
 	}

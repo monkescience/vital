@@ -1,6 +1,7 @@
 package vital_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -19,7 +20,7 @@ func ExampleRespondProblem() {
 			WithType("https://api.example.com/errors/not-found").
 			WithInstance(r.URL.Path)
 
-		vital.RespondProblem(w, problem)
+		vital.RespondProblem(r.Context(), w, problem)
 	})
 
 	// Simulate request
@@ -192,7 +193,7 @@ func TestRespondProblem(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
 	// WHEN: responding with the problem detail
-	vital.RespondProblem(recorder, problem)
+	vital.RespondProblem(context.Background(), recorder, problem)
 
 	// THEN: it should return the correct status code and content type
 	if recorder.Code != http.StatusBadRequest {

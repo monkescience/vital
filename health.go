@@ -3,6 +3,7 @@ package vital
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -135,7 +136,7 @@ func LiveHandlerFunc() http.HandlerFunc {
 		response := LiveResponse{Status: StatusOK}
 
 		disableResponseCacheHeaders(writer)
-		respondJSON(writer, http.StatusOK, response)
+		respondJSON(req.Context(), writer, http.StatusOK, response)
 	}
 }
 
@@ -195,7 +196,7 @@ func readyHandler(
 	}
 
 	disableResponseCacheHeaders(writer)
-	respondJSON(writer, statusCode, response)
+	respondJSON(ctx, writer, statusCode, response)
 }
 
 func contextWithTimeoutIfNeeded(
@@ -238,13 +239,18 @@ func overallStatus(checks []CheckResponse) Status {
 }
 
 func respondJSON(
+	ctx context.Context,
 	writer http.ResponseWriter,
 	statusCode int,
 	payload any,
 ) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(statusCode)
-	_ = json.NewEncoder(writer).Encode(payload) //nolint:errchkjson
+
+	err := json.NewEncoder(writer).Encode(payload)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to encode JSON response", slog.Any("error", err))
+	}
 }
 
 // disableResponseCacheHeaders sets headers to prevent caching of health responses.
