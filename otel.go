@@ -2,6 +2,7 @@ package vital
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -67,31 +68,40 @@ func newOTelConfig(opts ...OTelOption) *otelConfig {
 }
 
 // OTel returns a middleware that instruments HTTP requests with OpenTelemetry traces and metrics.
+// Returns an error if required metric instruments cannot be created.
 //
 // Features:
 //   - Creates a span for each HTTP request with standard HTTP semantic conventions
 //   - Propagates W3C traceparent headers (incoming and outgoing)
 //   - Records HTTP metrics: http.server.request.duration histogram
 //   - Adds trace_id and span_id to request context for log correlation
-//   - Gracefully degrades if providers not configured (no-op mode)
+//   - Returns an error if the duration histogram instrument cannot be created
 //
 // Example:
 //
 //	tp := sdktrace.NewTracerProvider(...)
 //	mp := sdkmetric.NewMeterProvider(...)
-//	handler := vital.OTel(
+//	middleware, err := vital.OTel(
 //	    vital.WithTracerProvider(tp),
 //	    vital.WithMeterProvider(mp),
-//	)(myHandler)
-func OTel(opts ...OTelOption) Middleware {
+//	)
+//	if err != nil {
+//	    return err
+//	}
+//	handler := middleware(myHandler)
+func OTel(opts ...OTelOption) (Middleware, error) {
 	cfg := newOTelConfig(opts...)
 	tracer := cfg.tracerProvider.Tracer(instrumentationName)
 	meter := cfg.meterProvider.Meter(instrumentationName)
-	durationHistogram, _ := meter.Float64Histogram(
+
+	durationHistogram, histogramErr := meter.Float64Histogram(
 		"http.server.request.duration",
 		metric.WithDescription("Duration of HTTP server requests"),
 		metric.WithUnit("s"),
 	)
+	if histogramErr != nil {
+		return nil, fmt.Errorf("create request duration histogram: %w", histogramErr)
+	}
 
 	return func(next http.Handler) http.Handler {
 		//nolint:varnamelen // w and r are conventional names for http.ResponseWriter and *http.Request
@@ -104,6 +114,7 @@ func OTel(opts ...OTelOption) Middleware {
 			if spanCtx := span.SpanContext(); spanCtx.IsValid() {
 				ctx = context.WithValue(ctx, TraceIDKey, spanCtx.TraceID().String())
 				ctx = context.WithValue(ctx, SpanIDKey, spanCtx.SpanID().String())
+				ctx = context.WithValue(ctx, TraceFlagsKey, spanCtx.TraceFlags().String())
 			}
 
 			rw := &otelResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
@@ -115,7 +126,7 @@ func OTel(opts ...OTelOption) Middleware {
 
 			recordOTelMetrics(ctx, r, rw, span, durationHistogram, start)
 		})
-	}
+	}, nil
 }
 
 func recordOTelMetrics(
@@ -132,6 +143,7 @@ func recordOTelMetrics(
 		semconv.HTTPResponseStatusCodeKey.Int(rw.statusCode),
 	}
 	histogram.Record(ctx, duration, metric.WithAttributes(attrs...))
+
 	span.SetAttributes(append(attrs, semconv.URLPathKey.String(r.URL.Path))...)
 }
 

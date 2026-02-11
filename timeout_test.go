@@ -152,6 +152,41 @@ func TestTimeout(t *testing.T) {
 		}
 	})
 
+	t.Run("suppresses late writes after timeout response", func(t *testing.T) {
+		// given: a handler that ignores cancellation and writes after timeout
+		lateWriteAttempted := make(chan struct{})
+
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			<-r.Context().Done()
+
+			_, _ = w.Write([]byte("late-write"))
+
+			close(lateWriteAttempted)
+		})
+
+		middleware := vital.Timeout(10 * time.Millisecond)
+		timeoutHandler := middleware(handler)
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+
+		// when: timeout response is written before handler attempts late write
+		timeoutHandler.ServeHTTP(rec, req)
+
+		select {
+		case <-lateWriteAttempted:
+		case <-time.After(250 * time.Millisecond):
+			t.Fatal("expected late write attempt to complete")
+		}
+
+		// then: late writes should not be added to the timeout response
+		if strings.Contains(rec.Body.String(), "late-write") {
+			t.Errorf("expected timeout response body without late writes, got %q", rec.Body.String())
+		}
+
+		assertTimeoutProblemResponse(t, rec)
+	})
+
 	t.Run("with middleware chain", func(t *testing.T) {
 		tests := []struct {
 			name           string

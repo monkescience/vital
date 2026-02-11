@@ -46,6 +46,10 @@ type mockChecker struct {
 	delay   time.Duration
 }
 
+type panicChecker struct {
+	name string
+}
+
 func (m *mockChecker) Name() string {
 	return m.name
 }
@@ -60,6 +64,14 @@ func (m *mockChecker) Check(ctx context.Context) (vital.Status, string) {
 	}
 
 	return m.status, m.message
+}
+
+func (p *panicChecker) Name() string {
+	return p.name
+}
+
+func (p *panicChecker) Check(_ context.Context) (vital.Status, string) {
+	panic("checker panic")
 }
 
 func TestLiveHandler(t *testing.T) {
@@ -294,6 +306,58 @@ func TestReadyHandler(t *testing.T) {
 
 		if check.Message != "connection refused" {
 			t.Errorf("expected message 'connection refused', got %v", check.Message)
+		}
+	})
+
+	t.Run("panicking checker", func(t *testing.T) {
+		// given: a health handler with a checker that panics
+		checker := &panicChecker{name: "cache"}
+
+		handlers := vital.NewHealthHandler(
+			vital.WithVersion("1.0.0"),
+			vital.WithCheckers(checker),
+		)
+		responseRecorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+
+		// when: calling the ready endpoint
+		handlers.ServeHTTP(responseRecorder, req)
+
+		// then: it should not crash and should return an error health response
+		if responseRecorder.Code != http.StatusServiceUnavailable {
+			t.Errorf(
+				"handler returned wrong status code: got %v want %v",
+				responseRecorder.Code,
+				http.StatusServiceUnavailable,
+			)
+		}
+
+		var response vital.ReadyResponse
+
+		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
+		if err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if response.Status != vital.StatusError {
+			t.Errorf("expected status %v, got %v", vital.StatusError, response.Status)
+		}
+
+		if len(response.Checks) != 1 {
+			t.Fatalf("expected 1 check, got %d", len(response.Checks))
+		}
+
+		check := response.Checks[0]
+		if check.Name != "cache" {
+			t.Errorf("expected check name 'cache', got %v", check.Name)
+		}
+
+		if check.Status != vital.StatusError {
+			t.Errorf("expected check status %v, got %v", vital.StatusError, check.Status)
+		}
+
+		if !strings.Contains(check.Message, "panic") {
+			t.Errorf("expected panic message, got %v", check.Message)
 		}
 	})
 

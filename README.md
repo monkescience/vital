@@ -210,6 +210,8 @@ If the handler exceeds the timeout, returns:
 
 Add distributed tracing and metrics:
 
+`vital.OTel` validates metric instrument setup and returns an error if initialization fails.
+
 ```go
 import (
 	"go.opentelemetry.io/otel/sdk/trace"
@@ -221,10 +223,15 @@ tp := trace.NewTracerProvider(...)
 mp := metric.NewMeterProvider(...)
 
 // Apply middleware
-handler := vital.OTel(
+otelMiddleware, err := vital.OTel(
 	vital.WithTracerProvider(tp),
 	vital.WithMeterProvider(mp),
-)(mux)
+)
+if err != nil {
+	panic(err)
+}
+
+handler := otelMiddleware(mux)
 ```
 
 Features:
@@ -297,14 +304,17 @@ Uses constant-time comparison to prevent timing attacks.
 Chain multiple middleware together (applied right-to-left):
 
 ```go
+otelMiddleware, err := vital.OTel(
+	vital.WithTracerProvider(tp),
+	vital.WithMeterProvider(mp),
+)
+if err != nil {
+	panic(err)
+}
+
 handler := vital.Recovery(logger)(
 	vital.RequestLogger(logger)(
-		vital.OTel(
-			vital.WithTracerProvider(tp),
-			vital.WithMeterProvider(mp),
-		)(
-			vital.Timeout(30 * time.Second)(mux),
-		),
+		otelMiddleware(vital.Timeout(30 * time.Second)(mux)),
 	),
 )
 ```
@@ -323,40 +333,43 @@ Use RFC 9457 ProblemDetail for consistent error responses:
 
 ```go
 // 400 Bad Request
-vital.RespondProblem(w, vital.BadRequest("invalid input"))
+vital.RespondProblem(r.Context(), w, vital.BadRequest("invalid input"))
 
 // 401 Unauthorized
-vital.RespondProblem(w, vital.Unauthorized("authentication required"))
+vital.RespondProblem(r.Context(), w, vital.Unauthorized("authentication required"))
 
 // 403 Forbidden
-vital.RespondProblem(w, vital.Forbidden("insufficient permissions"))
+vital.RespondProblem(r.Context(), w, vital.Forbidden("insufficient permissions"))
 
 // 404 Not Found
-vital.RespondProblem(w, vital.NotFound("user not found"))
+vital.RespondProblem(r.Context(), w, vital.NotFound("user not found"))
 
 // 409 Conflict
-vital.RespondProblem(w, vital.Conflict("email already exists"))
+vital.RespondProblem(r.Context(), w, vital.Conflict("email already exists"))
 
 // 422 Unprocessable Entity
-vital.RespondProblem(w, vital.UnprocessableEntity("validation failed"))
+vital.RespondProblem(r.Context(), w, vital.UnprocessableEntity("validation failed"))
 
 // 500 Internal Server Error
-vital.RespondProblem(w, vital.InternalServerError("database error"))
+vital.RespondProblem(r.Context(), w, vital.InternalServerError("database error"))
 
 // 503 Service Unavailable
-vital.RespondProblem(w, vital.ServiceUnavailable("service temporarily unavailable"))
+vital.RespondProblem(r.Context(), w, vital.ServiceUnavailable("service temporarily unavailable"))
 ```
 
 ### Custom ProblemDetail
 
 ```go
-problem := vital.NewProblemDetail(http.StatusTeapot, "I'm a teapot").
-	WithType("https://example.com/errors/teapot").
-	WithDetail("Cannot brew coffee, I'm a teapot").
-	WithInstance("/api/coffee/123").
-	WithExtension("retry_after", 300)
+problem := vital.NewProblemDetail(
+	http.StatusTeapot,
+	"I'm a teapot",
+	vital.WithType("https://example.com/errors/teapot"),
+	vital.WithDetail("Cannot brew coffee, I'm a teapot"),
+	vital.WithInstance("/api/coffee/123"),
+	vital.WithExtension("retry_after", 300),
+)
 
-vital.RespondProblem(w, problem)
+vital.RespondProblem(r.Context(), w, problem)
 ```
 
 Response:
@@ -493,7 +506,7 @@ func main() {
 	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, r *http.Request) {
 		var req CreateUserRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			vital.RespondProblem(w, vital.BadRequest(err.Error()))
+			vital.RespondProblem(r.Context(), w, vital.BadRequest(err.Error()))
 			return
 		}
 
@@ -504,7 +517,7 @@ func main() {
 		)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "failed to create user", slog.Any("error", err))
-			vital.RespondProblem(w, vital.InternalServerError("failed to create user"))
+			vital.RespondProblem(r.Context(), w, vital.InternalServerError("failed to create user"))
 			return
 		}
 

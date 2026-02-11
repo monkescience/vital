@@ -3,6 +3,7 @@ package vital
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -52,6 +53,7 @@ type readyConfig struct {
 
 func runCheck(ctx context.Context, chk Checker) CheckResponse {
 	start := time.Now()
+	checkerName := chk.Name()
 
 	status, msg := chk.Check(ctx)
 
@@ -67,7 +69,7 @@ func runCheck(ctx context.Context, chk Checker) CheckResponse {
 	}
 
 	return CheckResponse{
-		Name:     chk.Name(),
+		Name:     checkerName,
 		Status:   status,
 		Message:  msg,
 		Duration: time.Since(start).String(),
@@ -219,6 +221,19 @@ func runAllChecks(ctx context.Context, checkers []Checker) []CheckResponse {
 		checkerIndex, chk := idx, checker
 
 		waitGroup.Go(func() {
+			start := time.Now()
+
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					responses[checkerIndex] = CheckResponse{
+						Name:     checkerName(chk),
+						Status:   StatusError,
+						Message:  fmt.Sprintf("panic: %v", recovered),
+						Duration: time.Since(start).String(),
+					}
+				}
+			}()
+
 			responses[checkerIndex] = runCheck(ctx, chk)
 		})
 	}
@@ -226,6 +241,20 @@ func runAllChecks(ctx context.Context, checkers []Checker) []CheckResponse {
 	waitGroup.Wait()
 
 	return responses
+}
+
+func checkerName(chk Checker) string {
+	name := "unknown"
+
+	func() {
+		defer func() {
+			_ = recover()
+		}()
+
+		name = chk.Name()
+	}()
+
+	return name
 }
 
 func overallStatus(checks []CheckResponse) Status {

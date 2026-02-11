@@ -32,10 +32,15 @@ func ExampleOTel() {
 	})
 
 	// Wrap with OTel middleware
-	otelHandler := vital.OTel(
+	otelMiddleware, err := vital.OTel(
 		vital.WithTracerProvider(tp),
 		vital.WithMeterProvider(mp),
-	)(handler)
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	otelHandler := otelMiddleware(handler)
 
 	fmt.Println("Handler instrumented with OpenTelemetry")
 
@@ -58,7 +63,7 @@ func TestOTel(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		middleware := vital.OTel(vital.WithTracerProvider(tp))
+		middleware := mustOTelMiddleware(t, vital.WithTracerProvider(tp))
 		wrappedHandler := middleware(handler)
 
 		// when: processing an HTTP request
@@ -134,7 +139,7 @@ func TestOTel(t *testing.T) {
 					w.WriteHeader(tt.statusCode)
 				})
 
-				middleware := vital.OTel(vital.WithTracerProvider(tp))
+				middleware := mustOTelMiddleware(t, vital.WithTracerProvider(tp))
 				wrappedHandler := middleware(handler)
 
 				// when: processing the request
@@ -185,7 +190,8 @@ func TestOTel(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		middleware := vital.OTel(
+		middleware := mustOTelMiddleware(
+			t,
 			vital.WithTracerProvider(tp),
 			vital.WithPropagator(propagator),
 		)
@@ -239,7 +245,7 @@ func TestOTel(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		middleware := vital.OTel(vital.WithTracerProvider(tp))
+		middleware := mustOTelMiddleware(t, vital.WithTracerProvider(tp))
 		wrappedHandler := middleware(handler)
 
 		// when: processing request without traceparent
@@ -282,7 +288,7 @@ func TestOTel(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		middleware := vital.OTel(vital.WithMeterProvider(mp))
+		middleware := mustOTelMiddleware(t, vital.WithMeterProvider(mp))
 		wrappedHandler := middleware(handler)
 
 		// when: processing multiple requests
@@ -342,7 +348,7 @@ func TestOTel(t *testing.T) {
 			_, _ = w.Write([]byte("success"))
 		})
 
-		middleware := vital.OTel() // No providers configured
+		middleware := mustOTelMiddleware(t) // No providers configured
 		wrappedHandler := middleware(handler)
 
 		// when: processing request
@@ -368,7 +374,7 @@ func TestOTel(t *testing.T) {
 			_, _ = w.Write([]byte("success"))
 		})
 
-		middleware := vital.OTel() // No providers configured
+		middleware := mustOTelMiddleware(t) // No providers configured
 		wrappedHandler := middleware(handler)
 
 		// when: processing request
@@ -394,17 +400,18 @@ func TestOTel(t *testing.T) {
 			sdktrace.WithSyncer(spanExporter),
 		)
 
-		var capturedTraceID, capturedSpanID string
+		var capturedTraceID, capturedSpanID, capturedTraceFlags string
 
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Extract trace context from request context
 			capturedTraceID = vital.GetTraceID(r.Context())
 			capturedSpanID = vital.GetSpanID(r.Context())
+			capturedTraceFlags = vital.GetTraceFlags(r.Context())
 
 			w.WriteHeader(http.StatusOK)
 		})
 
-		middleware := vital.OTel(vital.WithTracerProvider(tp))
+		middleware := mustOTelMiddleware(t, vital.WithTracerProvider(tp))
 		wrappedHandler := middleware(handler)
 
 		// when: processing request
@@ -422,6 +429,10 @@ func TestOTel(t *testing.T) {
 			t.Error("expected span_id in context, got empty string")
 		}
 
+		if capturedTraceFlags == "" {
+			t.Error("expected trace_flags in context, got empty string")
+		}
+
 		// Verify they match the span
 		spans := spanExporter.GetSpans()
 		if len(spans) != 1 {
@@ -431,6 +442,7 @@ func TestOTel(t *testing.T) {
 		span := spans[0]
 		expectedTraceID := span.SpanContext.TraceID().String()
 		expectedSpanID := span.SpanContext.SpanID().String()
+		expectedTraceFlags := span.SpanContext.TraceFlags().String()
 
 		if capturedTraceID != expectedTraceID {
 			t.Errorf("trace_id mismatch: expected %s, got %s", expectedTraceID, capturedTraceID)
@@ -438,6 +450,10 @@ func TestOTel(t *testing.T) {
 
 		if capturedSpanID != expectedSpanID {
 			t.Errorf("span_id mismatch: expected %s, got %s", expectedSpanID, capturedSpanID)
+		}
+
+		if capturedTraceFlags != expectedTraceFlags {
+			t.Errorf("trace_flags mismatch: expected %s, got %s", expectedTraceFlags, capturedTraceFlags)
 		}
 	})
 
@@ -454,7 +470,8 @@ func TestOTel(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		middleware := vital.OTel(
+		middleware := mustOTelMiddleware(
+			t,
 			vital.WithTracerProvider(tp),
 			vital.WithPropagator(propagator),
 		)
@@ -505,11 +522,12 @@ func TestOTel(t *testing.T) {
 		})
 
 		logger := slog.New(slog.DiscardHandler)
+		otelMiddleware := mustOTelMiddleware(t, vital.WithTracerProvider(tp))
 
 		// Chain: Recovery -> RequestLogger -> OTel -> Handler
 		wrappedHandler := vital.Recovery(logger)(
 			vital.RequestLogger(logger)(
-				vital.OTel(vital.WithTracerProvider(tp))(handler),
+				otelMiddleware(handler),
 			),
 		)
 
@@ -572,7 +590,8 @@ func TestOTel(t *testing.T) {
 					w.WriteHeader(http.StatusOK)
 				})
 
-				middleware := vital.OTel(
+				middleware := mustOTelMiddleware(
+					t,
 					vital.WithTracerProvider(tp),
 					vital.WithPropagator(propagator),
 				)
@@ -615,6 +634,17 @@ func findMetricByName(scopeMetrics []metricdata.ScopeMetrics, name string) *metr
 	}
 
 	return nil
+}
+
+func mustOTelMiddleware(t *testing.T, opts ...vital.OTelOption) vital.Middleware {
+	t.Helper()
+
+	middleware, err := vital.OTel(opts...)
+	if err != nil {
+		t.Fatalf("failed to create OTel middleware: %v", err)
+	}
+
+	return middleware
 }
 
 func assertAttributeValue(t *testing.T, attrs []attribute.KeyValue, key attribute.Key, expected string) {

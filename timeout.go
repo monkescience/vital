@@ -66,6 +66,9 @@ func Timeout(duration time.Duration) Middleware {
 					return
 				}
 
+				wrapped.timedOut = true
+				wrapped.headersSent = true
+
 				RespondProblem(ctx, w, ServiceUnavailable("request timeout exceeded"))
 			}
 		})
@@ -77,12 +80,17 @@ type timeoutResponseWriter struct {
 	http.ResponseWriter
 	mu          sync.Mutex
 	headersSent bool
+	timedOut    bool
 }
 
 // WriteHeader captures whether headers have been sent.
 func (tw *timeoutResponseWriter) WriteHeader(code int) {
 	tw.mu.Lock()
 	defer tw.mu.Unlock()
+
+	if tw.timedOut {
+		return
+	}
 
 	if !tw.headersSent {
 		tw.headersSent = true
@@ -94,6 +102,10 @@ func (tw *timeoutResponseWriter) WriteHeader(code int) {
 func (tw *timeoutResponseWriter) Write(b []byte) (int, error) {
 	tw.mu.Lock()
 	defer tw.mu.Unlock()
+
+	if tw.timedOut {
+		return 0, http.ErrHandlerTimeout
+	}
 
 	if !tw.headersSent {
 		tw.headersSent = true
