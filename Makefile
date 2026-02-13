@@ -1,6 +1,6 @@
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 
-.PHONY: test lint fmt build clean mod-tidy coverage coverage-ci coverage-total help
+.PHONY: test lint fmt build clean mod-tidy coverage coverage-html coverage-total help
 
 help: ## Show help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
@@ -11,14 +11,14 @@ test: ## Run tests
 build: ## Build all packages
 	go build ./...
 
-coverage-ci: ## Run tests with coverage for CI
-	go test -race -coverprofile=coverage.out -covermode=atomic ./...
-
 coverage-total: ## Print total coverage percent
 	@go tool cover -func=coverage.out | awk '/^total:/ {gsub("%", "", $$3); print $$3}'
 
 coverage: ## Run tests with coverage
-	$(MAKE) coverage-ci
+	go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+coverage-html: ## Generate HTML coverage report
+	$(MAKE) coverage
 	go tool cover -html=coverage.out -o coverage.html
 
 lint: ## Run linter

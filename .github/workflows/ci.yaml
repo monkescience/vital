@@ -42,7 +42,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Run tests with coverage
-        run: make coverage-ci
+        run: make coverage
 
       - name: Publish coverage summary
         shell: bash
@@ -72,7 +72,7 @@ jobs:
           trap 'git worktree remove --force "$BASE_DIR"' EXIT
 
           pushd "$BASE_DIR" >/dev/null
-          if make coverage-ci; then
+          if make coverage; then
             BASE_COVERAGE=$(make coverage-total)
           else
             echo "::warning::Base branch tests failed; using PR coverage as baseline"
