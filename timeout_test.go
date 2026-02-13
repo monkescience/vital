@@ -158,6 +158,7 @@ func TestTimeout(t *testing.T) {
 
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			<-r.Context().Done()
+			time.Sleep(20 * time.Millisecond)
 
 			_, _ = w.Write([]byte("late-write"))
 
