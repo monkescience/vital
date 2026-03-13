@@ -8,12 +8,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 )
 
 const (
 	defaultShutdownTimeout = 20 * time.Second
+	readTimeout            = 30 * time.Second
 	readHeaderTimeout      = 10 * time.Second
 	writeTimeout           = 10 * time.Second
 	idleTimeout            = 120 * time.Second
@@ -29,6 +31,8 @@ type Server struct {
 	keyPath         string
 	certificatePath string
 	shutdownTimeout time.Duration
+	shutdownFuncs   []func(context.Context)
+	shutdownOnce    sync.Once
 	logger          *slog.Logger
 }
 
@@ -59,8 +63,26 @@ func WithShutdownTimeout(timeout time.Duration) ServerOption {
 	}
 }
 
+// WithShutdownFunc registers a cleanup hook that runs during shutdown.
+func WithShutdownFunc(fn func(context.Context)) ServerOption {
+	return func(s *Server) {
+		if fn == nil {
+			return
+		}
+
+		s.shutdownFuncs = append(s.shutdownFuncs, fn)
+	}
+}
+
 // WithReadTimeout sets the maximum duration for reading the entire request.
 func WithReadTimeout(timeout time.Duration) ServerOption {
+	return func(s *Server) {
+		s.ReadTimeout = timeout
+	}
+}
+
+// WithReadHeaderTimeout sets the maximum duration for reading request headers.
+func WithReadHeaderTimeout(timeout time.Duration) ServerOption {
 	return func(s *Server) {
 		s.ReadHeaderTimeout = timeout
 	}
@@ -96,6 +118,7 @@ func NewServer(handler http.Handler, opts ...ServerOption) *Server {
 	//nolint:exhaustruct // Only setting required fields, others use sensible defaults
 	srv := &http.Server{
 		Handler:           handler,
+		ReadTimeout:       readTimeout,
 		ReadHeaderTimeout: readHeaderTimeout,
 		WriteTimeout:      writeTimeout,
 		IdleTimeout:       idleTimeout,
@@ -143,6 +166,7 @@ func (server *Server) Run() {
 			"server error",
 			slog.Any("err", err),
 		)
+		server.runShutdownFuncsWithTimeout()
 		os.Exit(1)
 
 	case sig := <-shutdown:
@@ -200,6 +224,7 @@ func (server *Server) Stop() error {
 	)
 
 	err := server.Shutdown(ctx)
+	server.runShutdownFuncs(ctx)
 
 	cancel()
 
@@ -208,4 +233,34 @@ func (server *Server) Stop() error {
 	}
 
 	return nil
+}
+
+func (server *Server) runShutdownFuncsWithTimeout() {
+	ctx, cancel := context.WithTimeout(context.Background(), server.shutdownTimeout)
+	defer cancel()
+
+	server.runShutdownFuncs(ctx)
+}
+
+func (server *Server) runShutdownFuncs(ctx context.Context) {
+	server.shutdownOnce.Do(func() {
+		for idx := len(server.shutdownFuncs) - 1; idx >= 0; idx-- {
+			shutdownFunc := server.shutdownFuncs[idx]
+
+			func(hookIndex int) {
+				defer func() {
+					if recovered := recover(); recovered != nil {
+						server.logger.ErrorContext(
+							ctx,
+							"shutdown hook panicked",
+							slog.Int("index", hookIndex),
+							slog.Any("panic", recovered),
+						)
+					}
+				}()
+
+				shutdownFunc(ctx)
+			}(idx)
+		}
+	})
 }

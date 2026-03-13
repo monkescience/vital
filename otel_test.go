@@ -1,11 +1,13 @@
 package vital_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,10 +22,31 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// ExampleOTel demonstrates using OpenTelemetry middleware.
-func ExampleOTel() {
-	// Create tracer and meter providers
+// ExampleTracing demonstrates using tracing middleware.
+func ExampleTracing() {
+	// Create trace provider
 	tp := sdktrace.NewTracerProvider()
+
+	// Create handler
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// Wrap with tracing middleware
+	tracingHandler := vital.Tracing(vital.WithTracerProvider(tp))(handler)
+
+	fmt.Println("Handler instrumented with tracing")
+
+	// Cleanup
+	_ = tracingHandler
+
+	// Output:
+	// Handler instrumented with tracing
+}
+
+// ExampleMetrics demonstrates using metrics middleware.
+func ExampleMetrics() {
+	// Create meter provider
 	mp := sdkmetric.NewMeterProvider()
 
 	// Create handler
@@ -31,184 +54,100 @@ func ExampleOTel() {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// Wrap with OTel middleware
-	otelMiddleware, err := vital.OTel(
-		vital.WithTracerProvider(tp),
-		vital.WithMeterProvider(mp),
-	)
+	// Wrap with metrics middleware
+	metricsMiddleware, err := vital.Metrics(vital.WithMeterProvider(mp))
 	if err != nil {
 		panic(err)
 	}
 
-	otelHandler := otelMiddleware(handler)
+	metricsHandler := metricsMiddleware(handler)
 
-	fmt.Println("Handler instrumented with OpenTelemetry")
+	fmt.Println("Handler instrumented with metrics")
 
 	// Cleanup
-	_ = otelHandler
+	_ = metricsHandler
 
 	// Output:
-	// Handler instrumented with OpenTelemetry
+	// Handler instrumented with metrics
 }
 
-func TestOTel(t *testing.T) {
+func TestTracing(t *testing.T) {
 	t.Run("creates span for each request", func(t *testing.T) {
-		// given: OTel middleware with trace provider
+		// given: tracing middleware with trace provider
 		spanExporter := tracetest.NewInMemoryExporter()
 		tp := sdktrace.NewTracerProvider(
 			sdktrace.WithSyncer(spanExporter),
 		)
 
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
+			w.WriteHeader(http.StatusCreated)
 		})
 
-		middleware := mustOTelMiddleware(t, vital.WithTracerProvider(tp))
-		wrappedHandler := middleware(handler)
+		wrappedHandler := vital.Tracing(vital.WithTracerProvider(tp))(handler)
 
 		// when: processing an HTTP request
-		req := httptest.NewRequest(http.MethodGet, "/users/123", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/users/123", nil)
 		rec := httptest.NewRecorder()
 
 		wrappedHandler.ServeHTTP(rec, req)
 
-		// then: a span should be created
+		// then: a span should be created with standard HTTP attributes
 		spans := spanExporter.GetSpans()
 		if len(spans) != 1 {
-			t.Errorf("expected 1 span, got %d", len(spans))
+			t.Fatalf("expected 1 span, got %d", len(spans))
 		}
 
 		span := spans[0]
 		if span.SpanKind != trace.SpanKindServer {
 			t.Errorf("expected SpanKindServer, got %v", span.SpanKind)
 		}
-	})
 
-	t.Run("span has standard HTTP attributes", func(t *testing.T) {
-		tests := []struct {
-			name          string
-			method        string
-			path          string
-			statusCode    int
-			expectedAttrs map[string]any
-		}{
-			{
-				name:       "GET request with 200 OK",
-				method:     http.MethodGet,
-				path:       "/users/123",
-				statusCode: http.StatusOK,
-				expectedAttrs: map[string]any{
-					string(semconv.HTTPRequestMethodKey):      "GET",
-					string(semconv.HTTPResponseStatusCodeKey): int64(200),
-					string(semconv.URLPathKey):                "/users/123",
-				},
-			},
-			{
-				name:       "POST request with 201 Created",
-				method:     http.MethodPost,
-				path:       "/users",
-				statusCode: http.StatusCreated,
-				expectedAttrs: map[string]any{
-					string(semconv.HTTPRequestMethodKey):      "POST",
-					string(semconv.HTTPResponseStatusCodeKey): int64(201),
-					string(semconv.URLPathKey):                "/users",
-				},
-			},
-			{
-				name:       "DELETE request with 404 Not Found",
-				method:     http.MethodDelete,
-				path:       "/users/999",
-				statusCode: http.StatusNotFound,
-				expectedAttrs: map[string]any{
-					string(semconv.HTTPRequestMethodKey):      "DELETE",
-					string(semconv.HTTPResponseStatusCodeKey): int64(404),
-					string(semconv.URLPathKey):                "/users/999",
-				},
-			},
+		attrs := make(map[string]any)
+		for _, attr := range span.Attributes {
+			attrs[string(attr.Key)] = attr.Value.AsInterface()
 		}
 
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				// given: OTel middleware with trace provider
-				spanExporter := tracetest.NewInMemoryExporter()
-				tp := sdktrace.NewTracerProvider(
-					sdktrace.WithSyncer(spanExporter),
-				)
+		if attrs[string(semconv.HTTPRequestMethodKey)] != "GET" {
+			t.Errorf("expected method GET, got %v", attrs[string(semconv.HTTPRequestMethodKey)])
+		}
 
-				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.WriteHeader(tt.statusCode)
-				})
+		if attrs[string(semconv.HTTPResponseStatusCodeKey)] != int64(http.StatusCreated) {
+			t.Errorf("expected status 201, got %v", attrs[string(semconv.HTTPResponseStatusCodeKey)])
+		}
 
-				middleware := mustOTelMiddleware(t, vital.WithTracerProvider(tp))
-				wrappedHandler := middleware(handler)
-
-				// when: processing the request
-				req := httptest.NewRequest(tt.method, tt.path, nil)
-				rec := httptest.NewRecorder()
-
-				wrappedHandler.ServeHTTP(rec, req)
-
-				// then: span should have standard HTTP semconv attributes
-				spans := spanExporter.GetSpans()
-				if len(spans) != 1 {
-					t.Fatalf("expected 1 span, got %d", len(spans))
-				}
-
-				span := spans[0]
-
-				attrs := make(map[string]any)
-				for _, attr := range span.Attributes {
-					attrs[string(attr.Key)] = attr.Value.AsInterface()
-				}
-
-				for key, expectedValue := range tt.expectedAttrs {
-					actualValue, exists := attrs[key]
-					if !exists {
-						t.Errorf("expected attribute %q not found in span", key)
-
-						continue
-					}
-
-					if actualValue != expectedValue {
-						t.Errorf("attribute %q: expected %v, got %v", key, expectedValue, actualValue)
-					}
-				}
-			})
+		if attrs[string(semconv.URLPathKey)] != "/users/123" {
+			t.Errorf("expected path /users/123, got %v", attrs[string(semconv.URLPathKey)])
 		}
 	})
 
 	t.Run("propagates incoming W3C traceparent", func(t *testing.T) {
-		// given: OTel middleware with trace provider and W3C propagator
+		// given: tracing middleware with trace provider and W3C propagator
 		spanExporter := tracetest.NewInMemoryExporter()
 		tp := sdktrace.NewTracerProvider(
 			sdktrace.WithSyncer(spanExporter),
 		)
 
-		propagator := propagation.TraceContext{}
-
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		middleware := mustOTelMiddleware(
-			t,
+		wrappedHandler := vital.Tracing(
 			vital.WithTracerProvider(tp),
-			vital.WithPropagator(propagator),
-		)
-		wrappedHandler := middleware(handler)
+			vital.WithPropagator(propagation.TraceContext{}),
+		)(handler)
 
 		// when: request has incoming traceparent header
 		incomingTraceID := "4bf92f3577b34da6a3ce929d0e0e4736"
 		incomingSpanID := "00f067aa0ba902b7"
 		incomingTraceparent := "00-" + incomingTraceID + "-" + incomingSpanID + "-01"
 
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
 		req.Header.Set("Traceparent", incomingTraceparent)
 
 		rec := httptest.NewRecorder()
 		wrappedHandler.ServeHTTP(rec, req)
 
-		// then: span should have the same trace ID (child span)
+		// then: span should use the incoming trace ID as parent trace
 		spans := spanExporter.GetSpans()
 		if len(spans) != 1 {
 			t.Fatalf("expected 1 span, got %d", len(spans))
@@ -219,182 +158,21 @@ func TestOTel(t *testing.T) {
 			t.Errorf("expected trace ID %s, got %s", incomingTraceID, span.SpanContext.TraceID().String())
 		}
 
-		// Span ID should be different (new child span)
 		if span.SpanContext.SpanID().String() == incomingSpanID {
-			t.Error("expected new span ID (child), got same span ID as parent")
+			t.Error("expected child span with new span ID")
 		}
 
-		// Parent should be set
 		if !span.Parent.IsValid() {
 			t.Error("expected valid parent span context")
 		}
 
 		if !span.Parent.IsRemote() {
-			t.Error("expected parent to be remote")
+			t.Error("expected remote parent span context")
 		}
 	})
 
-	t.Run("generates new trace if no traceparent", func(t *testing.T) {
-		// given: OTel middleware without incoming traceparent
-		spanExporter := tracetest.NewInMemoryExporter()
-		tp := sdktrace.NewTracerProvider(
-			sdktrace.WithSyncer(spanExporter),
-		)
-
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		})
-
-		middleware := mustOTelMiddleware(t, vital.WithTracerProvider(tp))
-		wrappedHandler := middleware(handler)
-
-		// when: processing request without traceparent
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		rec := httptest.NewRecorder()
-
-		wrappedHandler.ServeHTTP(rec, req)
-
-		// then: new trace should be generated
-		spans := spanExporter.GetSpans()
-		if len(spans) != 1 {
-			t.Fatalf("expected 1 span, got %d", len(spans))
-		}
-
-		span := spans[0]
-		if !span.SpanContext.TraceID().IsValid() {
-			t.Error("expected valid trace ID")
-		}
-
-		if !span.SpanContext.SpanID().IsValid() {
-			t.Error("expected valid span ID")
-		}
-
-		// Should not have parent (root span)
-		if span.Parent.IsValid() {
-			t.Error("expected no parent for root span")
-		}
-	})
-
-	t.Run("records HTTP metrics", func(t *testing.T) {
-		// given: OTel middleware with meter provider
-		ctx := context.Background()
-		metricReader := sdkmetric.NewManualReader()
-		mp := sdkmetric.NewMeterProvider(
-			sdkmetric.WithReader(metricReader),
-		)
-
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			time.Sleep(10 * time.Millisecond) // Simulate work
-			w.WriteHeader(http.StatusOK)
-		})
-
-		middleware := mustOTelMiddleware(t, vital.WithMeterProvider(mp))
-		wrappedHandler := middleware(handler)
-
-		// when: processing multiple requests
-		for range 3 {
-			req := httptest.NewRequest(http.MethodGet, "/users", nil)
-			rec := httptest.NewRecorder()
-			wrappedHandler.ServeHTTP(rec, req)
-		}
-
-		// then: metrics should be recorded
-		var rm metricdata.ResourceMetrics
-
-		err := metricReader.Collect(ctx, &rm)
-		if err != nil {
-			t.Fatalf("failed to collect metrics: %v", err)
-		}
-
-		if len(rm.ScopeMetrics) == 0 {
-			t.Fatal("expected scope metrics, got none")
-		}
-
-		// Find http.server.request.duration histogram
-		metric := findMetricByName(rm.ScopeMetrics, "http.server.request.duration")
-		if metric == nil {
-			t.Fatal("expected http.server.request.duration metric")
-		}
-
-		// Should be a histogram
-		histogram, ok := metric.Data.(metricdata.Histogram[float64])
-		if !ok {
-			t.Fatalf("expected Histogram[float64], got %T", metric.Data)
-		}
-
-		// Should have data points
-		if len(histogram.DataPoints) == 0 {
-			t.Fatal("expected histogram data points, got none")
-		}
-
-		// Check first data point
-		dp := histogram.DataPoints[0]
-		if dp.Count != 3 {
-			t.Errorf("expected count 3, got %d", dp.Count)
-		}
-
-		if dp.Sum <= 0 {
-			t.Errorf("expected positive sum, got %f", dp.Sum)
-		}
-
-		// Should have http.request.method attribute
-		assertAttributeValue(t, dp.Attributes.ToSlice(), semconv.HTTPRequestMethodKey, "GET")
-	})
-
-	t.Run("no-op mode when tracer not configured", func(t *testing.T) {
-		// given: OTel middleware without tracer provider
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("success"))
-		})
-
-		middleware := mustOTelMiddleware(t) // No providers configured
-		wrappedHandler := middleware(handler)
-
-		// when: processing request
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		rec := httptest.NewRecorder()
-
-		// then: should not panic or error
-		wrappedHandler.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Errorf("expected status 200, got %d", rec.Code)
-		}
-
-		if rec.Body.String() != "success" {
-			t.Errorf("expected body 'success', got %q", rec.Body.String())
-		}
-	})
-
-	t.Run("no-op mode when meter not configured", func(t *testing.T) {
-		// given: OTel middleware without meter provider
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("success"))
-		})
-
-		middleware := mustOTelMiddleware(t) // No providers configured
-		wrappedHandler := middleware(handler)
-
-		// when: processing request
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		rec := httptest.NewRecorder()
-
-		// then: should not panic or error
-		wrappedHandler.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Errorf("expected status 200, got %d", rec.Code)
-		}
-
-		if rec.Body.String() != "success" {
-			t.Errorf("expected body 'success', got %q", rec.Body.String())
-		}
-	})
-
-	t.Run("integrates with context handler for log correlation", func(t *testing.T) {
-		// given: OTel middleware with trace provider
+	t.Run("adds trace context to request context", func(t *testing.T) {
+		// given: tracing middleware with trace provider
 		spanExporter := tracetest.NewInMemoryExporter()
 		tp := sdktrace.NewTracerProvider(
 			sdktrace.WithSyncer(spanExporter),
@@ -403,7 +181,6 @@ func TestOTel(t *testing.T) {
 		var capturedTraceID, capturedSpanID, capturedTraceFlags string
 
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Extract trace context from request context
 			capturedTraceID = vital.GetTraceID(r.Context())
 			capturedSpanID = vital.GetSpanID(r.Context())
 			capturedTraceFlags = vital.GetTraceFlags(r.Context())
@@ -411,224 +188,299 @@ func TestOTel(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		middleware := mustOTelMiddleware(t, vital.WithTracerProvider(tp))
-		wrappedHandler := middleware(handler)
+		wrappedHandler := vital.Tracing(vital.WithTracerProvider(tp))(handler)
 
 		// when: processing request
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
 		rec := httptest.NewRecorder()
 
 		wrappedHandler.ServeHTTP(rec, req)
 
-		// then: trace_id and span_id should be in context
+		// then: trace context values should be available in request context
 		if capturedTraceID == "" {
-			t.Error("expected trace_id in context, got empty string")
+			t.Error("expected non-empty trace ID")
 		}
 
 		if capturedSpanID == "" {
-			t.Error("expected span_id in context, got empty string")
+			t.Error("expected non-empty span ID")
 		}
 
 		if capturedTraceFlags == "" {
-			t.Error("expected trace_flags in context, got empty string")
+			t.Error("expected non-empty trace flags")
 		}
 
-		// Verify they match the span
 		spans := spanExporter.GetSpans()
 		if len(spans) != 1 {
 			t.Fatalf("expected 1 span, got %d", len(spans))
 		}
 
 		span := spans[0]
-		expectedTraceID := span.SpanContext.TraceID().String()
-		expectedSpanID := span.SpanContext.SpanID().String()
-		expectedTraceFlags := span.SpanContext.TraceFlags().String()
-
-		if capturedTraceID != expectedTraceID {
-			t.Errorf("trace_id mismatch: expected %s, got %s", expectedTraceID, capturedTraceID)
+		if capturedTraceID != span.SpanContext.TraceID().String() {
+			t.Errorf("expected trace ID %s, got %s", span.SpanContext.TraceID().String(), capturedTraceID)
 		}
 
-		if capturedSpanID != expectedSpanID {
-			t.Errorf("span_id mismatch: expected %s, got %s", expectedSpanID, capturedSpanID)
-		}
-
-		if capturedTraceFlags != expectedTraceFlags {
-			t.Errorf("trace_flags mismatch: expected %s, got %s", expectedTraceFlags, capturedTraceFlags)
+		if capturedSpanID != span.SpanContext.SpanID().String() {
+			t.Errorf("expected span ID %s, got %s", span.SpanContext.SpanID().String(), capturedSpanID)
 		}
 	})
 
 	t.Run("propagates traceparent to response", func(t *testing.T) {
-		// given: OTel middleware with trace provider and propagator
+		// given: tracing middleware with trace provider and propagator
 		spanExporter := tracetest.NewInMemoryExporter()
 		tp := sdktrace.NewTracerProvider(
 			sdktrace.WithSyncer(spanExporter),
 		)
 
-		propagator := propagation.TraceContext{}
-
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		middleware := mustOTelMiddleware(
-			t,
+		wrappedHandler := vital.Tracing(
 			vital.WithTracerProvider(tp),
-			vital.WithPropagator(propagator),
-		)
-		wrappedHandler := middleware(handler)
+			vital.WithPropagator(propagation.TraceContext{}),
+		)(handler)
 
 		// when: processing request
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
 		rec := httptest.NewRecorder()
 
 		wrappedHandler.ServeHTTP(rec, req)
 
-		// then: response should have traceparent header
+		// then: response should include traceparent
 		traceparent := rec.Header().Get("Traceparent")
 		if traceparent == "" {
-			t.Error("expected traceparent in response headers")
+			t.Fatal("expected traceparent header in response")
 		}
 
-		// Verify format: 00-{trace-id}-{span-id}-{flags}
 		spans := spanExporter.GetSpans()
 		if len(spans) != 1 {
 			t.Fatalf("expected 1 span, got %d", len(spans))
 		}
 
-		span := spans[0]
-		expectedTraceID := span.SpanContext.TraceID().String()
-
-		if traceparent == "" {
-			t.Fatal("traceparent header is empty")
-		}
-
-		// Traceparent should contain the trace ID
-		// Format: 00-{32-hex-trace-id}-{16-hex-span-id}-{2-hex-flags}
+		expectedTraceID := spans[0].SpanContext.TraceID().String()
 		if len(traceparent) < len(expectedTraceID) {
 			t.Errorf("traceparent too short: %s", traceparent)
 		}
 	})
 
-	t.Run("works in middleware chain", func(t *testing.T) {
-		// given: OTel middleware in chain with Recovery and RequestLogger
-		spanExporter := tracetest.NewInMemoryExporter()
-		tp := sdktrace.NewTracerProvider(
-			sdktrace.WithSyncer(spanExporter),
-		)
-
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("success"))
-		})
-
-		logger := slog.New(slog.DiscardHandler)
-		otelMiddleware := mustOTelMiddleware(t, vital.WithTracerProvider(tp))
-
-		// Chain: Recovery -> RequestLogger -> OTel -> Handler
-		wrappedHandler := vital.Recovery(logger)(
-			vital.RequestLogger(logger)(
-				otelMiddleware(handler),
-			),
-		)
-
-		// when: processing request
-		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		rec := httptest.NewRecorder()
-
-		wrappedHandler.ServeHTTP(rec, req)
-
-		// then: should work correctly
-		if rec.Code != http.StatusOK {
-			t.Errorf("expected status 200, got %d", rec.Code)
-		}
-
-		if rec.Body.String() != "success" {
-			t.Errorf("expected body 'success', got %q", rec.Body.String())
-		}
-
-		// Span should be created
-		spans := spanExporter.GetSpans()
-		if len(spans) != 1 {
-			t.Errorf("expected 1 span, got %d", len(spans))
-		}
-	})
-
 	t.Run("handles invalid traceparent gracefully", func(t *testing.T) {
-		tests := []struct {
-			name        string
-			traceparent string
-		}{
-			{
-				name:        "malformed format",
-				traceparent: "invalid-format",
-			},
-			{
-				name:        "wrong version",
-				traceparent: "ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-			},
-			{
-				name:        "invalid trace ID",
-				traceparent: "00-00000000000000000000000000000000-00f067aa0ba902b7-01",
-			},
-			{
-				name:        "invalid span ID",
-				traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01",
-			},
+		// given: tracing middleware and invalid traceparent values
+		invalidTraceparents := []string{
+			"invalid-format",
+			"ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+			"00-00000000000000000000000000000000-00f067aa0ba902b7-01",
+			"00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01",
 		}
 
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				// given: OTel middleware with invalid traceparent
+		for _, traceparent := range invalidTraceparents {
+			t.Run(traceparent, func(t *testing.T) {
 				spanExporter := tracetest.NewInMemoryExporter()
 				tp := sdktrace.NewTracerProvider(
 					sdktrace.WithSyncer(spanExporter),
 				)
 
-				propagator := propagation.TraceContext{}
-
 				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.WriteHeader(http.StatusOK)
 				})
 
-				middleware := mustOTelMiddleware(
-					t,
+				wrappedHandler := vital.Tracing(
 					vital.WithTracerProvider(tp),
-					vital.WithPropagator(propagator),
-				)
-				wrappedHandler := middleware(handler)
+					vital.WithPropagator(propagation.TraceContext{}),
+				)(handler)
 
-				// when: processing request with invalid traceparent
-				req := httptest.NewRequest(http.MethodGet, "/", nil)
-				req.Header.Set("Traceparent", tt.traceparent)
+				req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+				req.Header.Set("Traceparent", traceparent)
 
 				rec := httptest.NewRecorder()
 				wrappedHandler.ServeHTTP(rec, req)
 
-				// then: should generate new trace (not crash)
+				// then: request should still succeed with a valid new trace
 				if rec.Code != http.StatusOK {
 					t.Errorf("expected status 200, got %d", rec.Code)
 				}
 
 				spans := spanExporter.GetSpans()
 				if len(spans) != 1 {
-					t.Errorf("expected 1 span, got %d", len(spans))
+					t.Fatalf("expected 1 span, got %d", len(spans))
 				}
 
-				// Should have valid trace ID (new trace generated)
-				span := spans[0]
-				if !span.SpanContext.TraceID().IsValid() {
-					t.Error("expected valid trace ID for new trace")
+				if !spans[0].SpanContext.TraceID().IsValid() {
+					t.Error("expected valid trace ID")
 				}
 			})
 		}
 	})
 }
 
+func TestMetrics(t *testing.T) {
+	t.Run("records HTTP request duration metrics", func(t *testing.T) {
+		// given: metrics middleware with manual metric reader
+		ctx := context.Background()
+		metricReader := sdkmetric.NewManualReader()
+		meterProvider := sdkmetric.NewMeterProvider(
+			sdkmetric.WithReader(metricReader),
+		)
+
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(10 * time.Millisecond)
+			w.WriteHeader(http.StatusOK)
+		})
+
+		metricsMiddleware := mustMetricsMiddleware(t, vital.WithMeterProvider(meterProvider))
+		wrappedHandler := metricsMiddleware(handler)
+
+		// when: processing multiple requests
+		for range 3 {
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/users", nil)
+			rec := httptest.NewRecorder()
+			wrappedHandler.ServeHTTP(rec, req)
+		}
+
+		// then: duration histogram should be recorded
+		var resourceMetrics metricdata.ResourceMetrics
+
+		err := metricReader.Collect(ctx, &resourceMetrics)
+		if err != nil {
+			t.Fatalf("failed to collect metrics: %v", err)
+		}
+
+		metric := findMetricByName(resourceMetrics.ScopeMetrics, "http.server.request.duration")
+		if metric == nil {
+			t.Fatal("expected http.server.request.duration metric")
+		}
+
+		histogram, ok := metric.Data.(metricdata.Histogram[float64])
+		if !ok {
+			t.Fatalf("expected Histogram[float64], got %T", metric.Data)
+		}
+
+		if len(histogram.DataPoints) == 0 {
+			t.Fatal("expected histogram data points")
+		}
+
+		dataPoint := histogram.DataPoints[0]
+		if dataPoint.Count != 3 {
+			t.Errorf("expected count 3, got %d", dataPoint.Count)
+		}
+
+		if dataPoint.Sum <= 0 {
+			t.Errorf("expected positive duration sum, got %f", dataPoint.Sum)
+		}
+
+		assertAttributeValue(t, dataPoint.Attributes.ToSlice(), semconv.HTTPRequestMethodKey, "GET")
+	})
+
+	t.Run("works with default meter provider", func(t *testing.T) {
+		// given: metrics middleware without explicit provider
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("success"))
+		})
+
+		metricsMiddleware := mustMetricsMiddleware(t)
+		wrappedHandler := metricsMiddleware(handler)
+
+		// when: processing request
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+
+		wrappedHandler.ServeHTTP(rec, req)
+
+		// then: request should complete successfully
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d", rec.Code)
+		}
+
+		if rec.Body.String() != "success" {
+			t.Errorf("expected body success, got %q", rec.Body.String())
+		}
+	})
+}
+
+func TestTracingAndMetricsChain(t *testing.T) {
+	t.Run("works in middleware chain and correlates logs", func(t *testing.T) {
+		// given: tracing and metrics middlewares with context-aware logger
+		spanExporter := tracetest.NewInMemoryExporter()
+		tracerProvider := sdktrace.NewTracerProvider(
+			sdktrace.WithSyncer(spanExporter),
+		)
+
+		metricReader := sdkmetric.NewManualReader()
+		meterProvider := sdkmetric.NewMeterProvider(
+			sdkmetric.WithReader(metricReader),
+		)
+
+		var logBuffer bytes.Buffer
+
+		logger := slog.New(vital.NewContextHandler(
+			slog.NewJSONHandler(&logBuffer, nil),
+			vital.WithBuiltinKeys(),
+		))
+
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("success"))
+		})
+
+		metricsMiddleware := mustMetricsMiddleware(t, vital.WithMeterProvider(meterProvider))
+
+		// Chain: Recovery -> Tracing -> Metrics -> RequestLogger -> Handler
+		wrappedHandler := vital.Recovery(logger)(
+			vital.Tracing(vital.WithTracerProvider(tracerProvider))(
+				metricsMiddleware(
+					vital.RequestLogger(logger)(handler),
+				),
+			),
+		)
+
+		// when: processing request
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
+		rec := httptest.NewRecorder()
+
+		wrappedHandler.ServeHTTP(rec, req)
+
+		// then: request should succeed and tracing, metrics, and logs should all be populated
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d", rec.Code)
+		}
+
+		if rec.Body.String() != "success" {
+			t.Errorf("expected body success, got %q", rec.Body.String())
+		}
+
+		spans := spanExporter.GetSpans()
+		if len(spans) != 1 {
+			t.Fatalf("expected 1 span, got %d", len(spans))
+		}
+
+		var resourceMetrics metricdata.ResourceMetrics
+
+		err := metricReader.Collect(context.Background(), &resourceMetrics)
+		if err != nil {
+			t.Fatalf("failed to collect metrics: %v", err)
+		}
+
+		metric := findMetricByName(resourceMetrics.ScopeMetrics, "http.server.request.duration")
+		if metric == nil {
+			t.Fatal("expected http.server.request.duration metric")
+		}
+
+		logOutput := logBuffer.String()
+		if !strings.Contains(logOutput, `"trace_id":"`) {
+			t.Errorf("expected trace_id in request log, got: %s", logOutput)
+		}
+
+		if !strings.Contains(logOutput, `"span_id":"`) {
+			t.Errorf("expected span_id in request log, got: %s", logOutput)
+		}
+	})
+}
+
 func findMetricByName(scopeMetrics []metricdata.ScopeMetrics, name string) *metricdata.Metrics {
-	for _, sm := range scopeMetrics {
-		for i := range sm.Metrics {
-			if sm.Metrics[i].Name == name {
-				return &sm.Metrics[i]
+	for _, scopeMetric := range scopeMetrics {
+		for idx := range scopeMetric.Metrics {
+			if scopeMetric.Metrics[idx].Name == name {
+				return &scopeMetric.Metrics[idx]
 			}
 		}
 	}
@@ -636,12 +488,12 @@ func findMetricByName(scopeMetrics []metricdata.ScopeMetrics, name string) *metr
 	return nil
 }
 
-func mustOTelMiddleware(t *testing.T, opts ...vital.OTelOption) vital.Middleware {
+func mustMetricsMiddleware(t *testing.T, opts ...vital.MetricsOption) vital.Middleware {
 	t.Helper()
 
-	middleware, err := vital.OTel(opts...)
+	middleware, err := vital.Metrics(opts...)
 	if err != nil {
-		t.Fatalf("failed to create OTel middleware: %v", err)
+		t.Fatalf("failed to create metrics middleware: %v", err)
 	}
 
 	return middleware

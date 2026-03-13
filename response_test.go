@@ -26,7 +26,7 @@ func ExampleRespondProblem() {
 	})
 
 	// Simulate request
-	req := httptest.NewRequest(http.MethodGet, "/users/123", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/users/123", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)

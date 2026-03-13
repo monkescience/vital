@@ -68,7 +68,7 @@ func TestBasicAuth(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// given: a request with or without credentials
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
 
 			if tt.username != "" || tt.password != "" {
 				auth := tt.username + ":" + tt.password
@@ -106,7 +106,7 @@ func TestBasicAuth(t *testing.T) {
 		middleware := vital.BasicAuth("user", "pass", "")
 		protectedHandler := middleware(handler)
 
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
 		rec := httptest.NewRecorder()
 
 		// when: accessing without credentials
@@ -137,7 +137,7 @@ func TestRequestLogger(t *testing.T) {
 		middleware := vital.RequestLogger(logger)
 		loggedHandler := middleware(handler)
 
-		req := httptest.NewRequest(http.MethodPost, "/api/users", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/users", nil)
 		req.Header.Set("User-Agent", "test-agent/1.0")
 
 		rec := httptest.NewRecorder()
@@ -190,7 +190,7 @@ func TestRequestLogger(t *testing.T) {
 				middleware := vital.RequestLogger(logger)
 				loggedHandler := middleware(handler)
 
-				req := httptest.NewRequest(http.MethodGet, "/", nil)
+				req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
 				rec := httptest.NewRecorder()
 
 				// when: the handler processes the request
@@ -225,7 +225,7 @@ func TestRecovery(t *testing.T) {
 		middleware := vital.Recovery(logger)
 		recoveredHandler := middleware(handler)
 
-		req := httptest.NewRequest(http.MethodGet, "/panic", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/panic", nil)
 		rec := httptest.NewRecorder()
 
 		// when: the handler is called
@@ -260,7 +260,7 @@ func TestRecovery(t *testing.T) {
 		middleware := vital.Recovery(logger)
 		recoveredHandler := middleware(handler)
 
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
 		rec := httptest.NewRecorder()
 
 		// when: the handler is called

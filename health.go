@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 )
 
@@ -51,6 +50,11 @@ type readyConfig struct {
 	overallTimeout time.Duration
 }
 
+type checkResult struct {
+	index    int
+	response CheckResponse
+}
+
 func runCheck(ctx context.Context, chk Checker) CheckResponse {
 	start := time.Now()
 	checkerName := chk.Name()
@@ -87,6 +91,7 @@ func WithOverallReadyTimeout(d time.Duration) ReadyOption {
 type handlerConfig struct {
 	version     string
 	environment string
+	startedFunc func() bool
 	checkers    []Checker
 	readyOpts   []ReadyOption
 }
@@ -109,12 +114,18 @@ func WithCheckers(checkers ...Checker) HealthHandlerOption {
 	return func(c *handlerConfig) { c.checkers = append(c.checkers, checkers...) }
 }
 
+// WithStartedFunc sets the startup probe function used by /health/started.
+func WithStartedFunc(startedFunc func() bool) HealthHandlerOption {
+	return func(c *handlerConfig) { c.startedFunc = startedFunc }
+}
+
 // WithReadyOptions configures readiness-specific options such as timeouts.
 func WithReadyOptions(opts ...ReadyOption) HealthHandlerOption {
 	return func(c *handlerConfig) { c.readyOpts = append(c.readyOpts, opts...) }
 }
 
-// NewHealthHandler creates an HTTP handler that provides health check endpoints at /health/live and /health/ready.
+// NewHealthHandler creates an HTTP handler that provides health check endpoints
+// at /health/live, /health/started, and /health/ready.
 func NewHealthHandler(opts ...HealthHandlerOption) http.Handler {
 	var handlerCfg handlerConfig
 	for _, o := range opts {
@@ -124,6 +135,7 @@ func NewHealthHandler(opts ...HealthHandlerOption) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health/live", LiveHandlerFunc())
+	mux.HandleFunc("GET /health/started", StartedHandlerFunc(handlerCfg.startedFunc))
 	mux.HandleFunc(
 		"GET /health/ready",
 		ReadyHandlerFunc(handlerCfg.version, handlerCfg.environment, handlerCfg.checkers, handlerCfg.readyOpts...),
@@ -139,6 +151,22 @@ func LiveHandlerFunc() http.HandlerFunc {
 
 		disableResponseCacheHeaders(writer)
 		respondJSON(req.Context(), writer, http.StatusOK, response)
+	}
+}
+
+// StartedHandlerFunc returns an HTTP handler function for startup health checks.
+func StartedHandlerFunc(startedFunc func() bool) http.HandlerFunc {
+	return func(writer http.ResponseWriter, req *http.Request) {
+		response := LiveResponse{Status: StatusOK}
+		statusCode := http.StatusOK
+
+		if startedFunc != nil && !startedFunc() {
+			response.Status = StatusError
+			statusCode = http.StatusServiceUnavailable
+		}
+
+		disableResponseCacheHeaders(writer)
+		respondJSON(req.Context(), writer, statusCode, response)
 	}
 }
 
@@ -214,33 +242,95 @@ func contextWithTimeoutIfNeeded(
 
 func runAllChecks(ctx context.Context, checkers []Checker) []CheckResponse {
 	responses := make([]CheckResponse, len(checkers))
-
-	var waitGroup sync.WaitGroup
-
-	for idx, checker := range checkers {
-		checkerIndex, chk := idx, checker
-
-		waitGroup.Go(func() {
-			start := time.Now()
-
-			defer func() {
-				if recovered := recover(); recovered != nil {
-					responses[checkerIndex] = CheckResponse{
-						Name:     checkerName(chk),
-						Status:   StatusError,
-						Message:  fmt.Sprintf("panic: %v", recovered),
-						Duration: time.Since(start).String(),
-					}
-				}
-			}()
-
-			responses[checkerIndex] = runCheck(ctx, chk)
-		})
+	if len(checkers) == 0 {
+		return responses
 	}
 
-	waitGroup.Wait()
+	results := make(chan checkResult, len(checkers))
+	startedAt := time.Now()
+
+	for idx, checker := range checkers {
+		startCheckWorker(ctx, results, idx, checker)
+	}
+
+	return collectCheckResponses(ctx, checkers, responses, results, startedAt)
+}
+
+func startCheckWorker(
+	ctx context.Context,
+	results chan<- checkResult,
+	checkerIndex int,
+	checker Checker,
+) {
+	go func() {
+		checkStartedAt := time.Now()
+		response := CheckResponse{}
+
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				response = CheckResponse{
+					Name:     checkerName(checker),
+					Status:   StatusError,
+					Message:  fmt.Sprintf("panic: %v", recovered),
+					Duration: time.Since(checkStartedAt).String(),
+				}
+			}
+
+			results <- checkResult{index: checkerIndex, response: response}
+		}()
+
+		response = runCheck(ctx, checker)
+	}()
+}
+
+func collectCheckResponses(
+	ctx context.Context,
+	checkers []Checker,
+	responses []CheckResponse,
+	results <-chan checkResult,
+	startedAt time.Time,
+) []CheckResponse {
+	finished := make([]bool, len(checkers))
+	remaining := len(checkers)
+
+	for remaining > 0 {
+		select {
+		case result := <-results:
+			responses[result.index] = result.response
+			finished[result.index] = true
+			remaining--
+		case <-ctx.Done():
+			markTimedOutChecks(ctx, checkers, finished, responses, startedAt)
+
+			return responses
+		}
+	}
 
 	return responses
+}
+
+func markTimedOutChecks(
+	ctx context.Context,
+	checkers []Checker,
+	finished []bool,
+	responses []CheckResponse,
+	startedAt time.Time,
+) {
+	elapsed := time.Since(startedAt).String()
+	errorMessage := ctx.Err().Error()
+
+	for idx, checker := range checkers {
+		if finished[idx] {
+			continue
+		}
+
+		responses[idx] = CheckResponse{
+			Name:     checkerName(checker),
+			Status:   StatusError,
+			Message:  errorMessage,
+			Duration: elapsed,
+		}
+	}
 }
 
 func checkerName(chk Checker) string {

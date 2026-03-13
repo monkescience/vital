@@ -5,8 +5,8 @@ Production-ready HTTP server utilities for Go with built-in observability, healt
 ## Features
 
 - **Server Management**: Graceful shutdown, TLS support, configurable timeouts
-- **Health Checks**: Liveness and readiness endpoints with custom checkers
-- **Middleware**: Timeout, OpenTelemetry, request logging, recovery, basic auth
+- **Health Checks**: Liveness, startup, and readiness endpoints with custom checkers
+- **Middleware**: Timeout, tracing, metrics, request logging, recovery, basic auth
 - **Error Responses**: RFC 9457 ProblemDetail for consistent error handling
 - **Structured Logging**: Context-aware logging with trace correlation
 
@@ -73,6 +73,7 @@ Test the server:
 
 ```bash
 curl http://localhost:8080/health/live
+curl http://localhost:8080/health/started
 curl http://localhost:8080/health/ready
 curl http://localhost:8080/api/hello
 ```
@@ -87,6 +88,7 @@ server := vital.NewServer(handler,
 	vital.WithTLS("cert.pem", "key.pem"),
 	vital.WithShutdownTimeout(30 * time.Second),
 	vital.WithReadTimeout(10 * time.Second),
+	vital.WithReadHeaderTimeout(10 * time.Second),
 	vital.WithWriteTimeout(10 * time.Second),
 	vital.WithIdleTimeout(120 * time.Second),
 	vital.WithLogger(logger),
@@ -108,7 +110,9 @@ server.Stop()
 | `WithPort(port)` | Set server port | Required |
 | `WithTLS(cert, key)` | Enable TLS with certificate paths | Disabled |
 | `WithShutdownTimeout(d)` | Graceful shutdown timeout | 20s |
-| `WithReadTimeout(d)` | Maximum duration for reading request | 10s |
+| `WithShutdownFunc(fn)` | Register cleanup hooks run during shutdown | None |
+| `WithReadTimeout(d)` | Maximum duration for reading entire request | 30s |
+| `WithReadHeaderTimeout(d)` | Maximum duration for reading request headers | 10s |
 | `WithWriteTimeout(d)` | Maximum duration for writing response | 10s |
 | `WithIdleTimeout(d)` | Maximum idle time between requests | 120s |
 | `WithLogger(logger)` | Set structured logger | `slog.Default()` |
@@ -127,9 +131,30 @@ healthHandler := vital.NewHealthHandler(
 mux.Handle("/", healthHandler)
 ```
 
-This creates two endpoints:
+This creates three endpoints:
 - `GET /health/live` - Liveness probe (always returns 200 OK)
+- `GET /health/started` - Startup probe (returns 200 OK by default)
 - `GET /health/ready` - Readiness probe (runs health checks)
+
+### Startup Probe
+
+Provide a startup function when your service has a warm-up phase:
+
+```go
+started := false
+
+healthHandler := vital.NewHealthHandler(
+	vital.WithStartedFunc(func() bool {
+		return started
+	}),
+)
+
+// Later, once initialization is complete:
+started = true
+```
+
+`/health/started` returns `503 Service Unavailable` until the function returns `true`.
+If no `WithStartedFunc` is configured, it behaves like the liveness endpoint.
 
 ### Custom Health Checkers
 
@@ -191,54 +216,50 @@ Readiness response:
 
 ### Timeout
 
-Enforce request timeout with automatic error response:
+Apply a cooperative request timeout via context deadline:
 
 ```go
 handler := vital.Timeout(30 * time.Second)(mux)
 ```
 
-If the handler exceeds the timeout, returns:
-```json
-{
-  "status": 503,
-  "title": "Service Unavailable",
-  "detail": "request timeout exceeded"
-}
-```
+`vital.Timeout` does not force a timeout response. It sets `r.Context()` deadline;
+handlers and downstream calls should honor cancellation (`ctx.Done()`).
 
 ### OpenTelemetry
 
-Add distributed tracing and metrics:
-
-`vital.OTel` validates metric instrument setup and returns an error if initialization fails.
+Add distributed tracing and metrics with separate middleware:
 
 ```go
 import (
-	"go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/trace"
 )
 
 // Setup providers
 tp := trace.NewTracerProvider(...)
 mp := metric.NewMeterProvider(...)
 
-// Apply middleware
-otelMiddleware, err := vital.OTel(
+tracing := vital.Tracing(
 	vital.WithTracerProvider(tp),
+)
+
+metrics, err := vital.Metrics(
 	vital.WithMeterProvider(mp),
 )
 if err != nil {
 	panic(err)
 }
 
-handler := otelMiddleware(mux)
+handler := metrics(tracing(mux))
 ```
 
-Features:
+Tracing features:
 - Creates spans for each HTTP request
 - Propagates W3C traceparent headers
+- Adds `trace_id`, `span_id`, and `trace_flags` to request context
+
+Metrics features:
 - Records `http.server.request.duration` histogram
-- Adds `trace_id` and `span_id` to request context
 
 ### Request Logger
 
@@ -253,7 +274,7 @@ Logs include:
 - Status code
 - Request duration
 - Remote address and user agent
-- Trace context (if OTel middleware is used)
+- Trace context (if Tracing middleware is used)
 
 Example log output:
 ```json
@@ -304,8 +325,7 @@ Uses constant-time comparison to prevent timing attacks.
 Chain multiple middleware together (applied right-to-left):
 
 ```go
-otelMiddleware, err := vital.OTel(
-	vital.WithTracerProvider(tp),
+metricsMiddleware, err := vital.Metrics(
 	vital.WithMeterProvider(mp),
 )
 if err != nil {
@@ -313,17 +333,61 @@ if err != nil {
 }
 
 handler := vital.Recovery(logger)(
-	vital.RequestLogger(logger)(
-		otelMiddleware(vital.Timeout(30 * time.Second)(mux)),
+	vital.Tracing(vital.WithTracerProvider(tp))(
+		metricsMiddleware(
+			vital.RequestLogger(logger)(
+				vital.Timeout(30 * time.Second)(mux),
+			),
+		),
 	),
 )
 ```
 
 Recommended order (innermost to outermost):
 1. Timeout - enforce request deadlines
-2. OTel - trace and metrics
-3. RequestLogger - log requests
-4. Recovery - catch panics
+2. RequestLogger - log requests (with tracing context)
+3. Metrics - record request duration
+4. Tracing - create and propagate spans
+5. Recovery - catch panics
+
+### Chi Example
+
+Yes, middleware groups are a great fit with `chi`:
+
+```go
+import (
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/monkescience/vital"
+)
+
+func newHandler(logger *slog.Logger) http.Handler {
+	router := chi.NewRouter()
+
+	metricsMiddleware, err := vital.Metrics()
+	if err != nil {
+		panic(err)
+	}
+
+	router.Group(func(r chi.Router) {
+		r.Use(vital.Recovery(logger))
+		r.Use(vital.Tracing())
+		r.Use(metricsMiddleware)
+		r.Use(vital.RequestLogger(logger))
+		r.Use(vital.Timeout(30 * time.Second))
+
+		r.Get("/hello", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("hello"))
+		})
+	})
+
+	return router
+}
+```
 
 ## Error Responses
 
@@ -551,7 +615,9 @@ func main() {
 | `WithPort` | `int` | Required | Server port |
 | `WithTLS` | `string, string` | Disabled | Certificate and key paths |
 | `WithShutdownTimeout` | `time.Duration` | 20s | Graceful shutdown timeout |
-| `WithReadTimeout` | `time.Duration` | 10s | Read timeout |
+| `WithShutdownFunc` | `func(context.Context)` | None | Shutdown cleanup hook |
+| `WithReadTimeout` | `time.Duration` | 30s | Read timeout |
+| `WithReadHeaderTimeout` | `time.Duration` | 10s | Read header timeout |
 | `WithWriteTimeout` | `time.Duration` | 10s | Write timeout |
 | `WithIdleTimeout` | `time.Duration` | 120s | Idle timeout |
 | `WithLogger` | `*slog.Logger` | `slog.Default()` | Structured logger |
@@ -562,6 +628,7 @@ func main() {
 |--------|------|-------------|
 | `WithVersion` | `string` | Version string in readiness response |
 | `WithEnvironment` | `string` | Environment string in readiness response |
+| `WithStartedFunc` | `func() bool` | Startup probe function for `/health/started` |
 | `WithCheckers` | `...Checker` | Custom health checkers |
 | `WithReadyOptions` | `...ReadyOption` | Readiness-specific options |
 
@@ -571,13 +638,18 @@ func main() {
 |--------|------|---------|-------------|
 | `WithOverallReadyTimeout` | `time.Duration` | 2s | Timeout for all checks |
 
-### OTel Options
+### Tracing Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `WithTracerProvider` | `trace.TracerProvider` | `otel.GetTracerProvider()` | Custom tracer provider |
-| `WithMeterProvider` | `metric.MeterProvider` | `otel.GetMeterProvider()` | Custom meter provider |
 | `WithPropagator` | `propagation.TextMapPropagator` | `propagation.TraceContext{}` | Custom propagator |
+
+### Metrics Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `WithMeterProvider` | `metric.MeterProvider` | `otel.GetMeterProvider()` | Custom meter provider |
 
 ### Logger Options
 

@@ -27,6 +27,7 @@ func ExampleNewHealthHandler() {
 
 	fmt.Println("Health endpoints configured")
 	fmt.Println("GET /health/live - liveness probe")
+	fmt.Println("GET /health/started - startup probe")
 	fmt.Println("GET /health/ready - readiness probe")
 
 	// Cleanup
@@ -35,6 +36,7 @@ func ExampleNewHealthHandler() {
 	// Output:
 	// Health endpoints configured
 	// GET /health/live - liveness probe
+	// GET /health/started - startup probe
 	// GET /health/ready - readiness probe
 }
 
@@ -48,6 +50,11 @@ type mockChecker struct {
 
 type panicChecker struct {
 	name string
+}
+
+type nonCooperativeChecker struct {
+	name  string
+	delay time.Duration
 }
 
 func (m *mockChecker) Name() string {
@@ -74,6 +81,16 @@ func (p *panicChecker) Check(_ context.Context) (vital.Status, string) {
 	panic("checker panic")
 }
 
+func (n *nonCooperativeChecker) Name() string {
+	return n.name
+}
+
+func (n *nonCooperativeChecker) Check(_ context.Context) (vital.Status, string) {
+	time.Sleep(n.delay)
+
+	return vital.StatusOK, "finished"
+}
+
 func TestLiveHandler(t *testing.T) {
 	t.Run("returns OK", func(t *testing.T) {
 		// given: a health handler with version and environment
@@ -86,7 +103,7 @@ func TestLiveHandler(t *testing.T) {
 			vital.WithCheckers(),
 		)
 		responseRecorder := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/health/live", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/live", nil)
 
 		// when: calling the live endpoint
 		handlers.ServeHTTP(responseRecorder, req)
@@ -120,7 +137,112 @@ func TestLiveHandler(t *testing.T) {
 		// given: a live handler function
 		handler := vital.LiveHandlerFunc()
 		responseRecorder := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/health/live", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/live", nil)
+
+		// when: calling the handler directly
+		handler(responseRecorder, req)
+
+		// then: it should return 200 OK
+		if responseRecorder.Code != http.StatusOK {
+			t.Errorf(
+				"handler returned wrong status code: got %v want %v",
+				responseRecorder.Code,
+				http.StatusOK,
+			)
+		}
+
+		var response vital.LiveResponse
+
+		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
+		if err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if response.Status != vital.StatusOK {
+			t.Errorf("expected status %v, got %v", vital.StatusOK, response.Status)
+		}
+	})
+}
+
+func TestStartedHandler(t *testing.T) {
+	t.Run("defaults to OK", func(t *testing.T) {
+		// given: a health handler without a custom started function
+		handlers := vital.NewHealthHandler(
+			vital.WithVersion("1.2.3"),
+			vital.WithEnvironment("eu-central-1-dev"),
+		)
+		responseRecorder := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/started", nil)
+
+		// when: calling the started endpoint
+		handlers.ServeHTTP(responseRecorder, req)
+
+		// then: it should behave like the liveness endpoint
+		if responseRecorder.Code != http.StatusOK {
+			t.Errorf(
+				"handler returned wrong status code: got %v want %v",
+				responseRecorder.Code,
+				http.StatusOK,
+			)
+		}
+
+		var response vital.LiveResponse
+
+		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
+		if err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if response.Status != vital.StatusOK {
+			t.Errorf("expected status %v, got %v", vital.StatusOK, response.Status)
+		}
+
+		if responseRecorder.Header().Get("Cache-Control") != "no-store, no-cache" {
+			t.Errorf("expected Cache-Control header to be set")
+		}
+	})
+
+	t.Run("returns service unavailable until started", func(t *testing.T) {
+		// given: a health handler with a started function that reports false
+		handlers := vital.NewHealthHandler(
+			vital.WithStartedFunc(func() bool {
+				return false
+			}),
+		)
+		responseRecorder := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/started", nil)
+
+		// when: calling the started endpoint
+		handlers.ServeHTTP(responseRecorder, req)
+
+		// then: it should return 503 Service Unavailable
+		if responseRecorder.Code != http.StatusServiceUnavailable {
+			t.Errorf(
+				"handler returned wrong status code: got %v want %v",
+				responseRecorder.Code,
+				http.StatusServiceUnavailable,
+			)
+		}
+
+		var response vital.LiveResponse
+
+		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
+		if err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if response.Status != vital.StatusError {
+			t.Errorf("expected status %v, got %v", vital.StatusError, response.Status)
+		}
+	})
+
+	t.Run("direct handler func", func(t *testing.T) {
+		// given: a started handler function that reports ready
+		handler := vital.StartedHandlerFunc(func() bool {
+			return true
+		})
+		responseRecorder := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/started", nil)
 
 		// when: calling the handler directly
 		handler(responseRecorder, req)
@@ -158,7 +280,7 @@ func TestReadyHandler(t *testing.T) {
 			vital.WithEnvironment(environment),
 		)
 		responseRecorder := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/ready", nil)
 
 		// when: calling the ready endpoint
 		handlers.ServeHTTP(responseRecorder, req)
@@ -210,7 +332,7 @@ func TestReadyHandler(t *testing.T) {
 			vital.WithCheckers(checker),
 		)
 		responseRecorder := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/ready", nil)
 
 		// when: calling the ready endpoint
 		handlers.ServeHTTP(responseRecorder, req)
@@ -270,7 +392,7 @@ func TestReadyHandler(t *testing.T) {
 			vital.WithCheckers(checker),
 		)
 		responseRecorder := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/ready", nil)
 
 		// when: calling the ready endpoint
 		handlers.ServeHTTP(responseRecorder, req)
@@ -318,7 +440,7 @@ func TestReadyHandler(t *testing.T) {
 			vital.WithCheckers(checker),
 		)
 		responseRecorder := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/ready", nil)
 
 		// when: calling the ready endpoint
 		handlers.ServeHTTP(responseRecorder, req)
@@ -374,7 +496,7 @@ func TestReadyHandler(t *testing.T) {
 			vital.WithCheckers(checkers...),
 		)
 		responseRecorder := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/ready", nil)
 
 		// when: calling the ready endpoint
 		handlers.ServeHTTP(responseRecorder, req)
@@ -417,7 +539,7 @@ func TestReadyHandler(t *testing.T) {
 			vital.WithCheckers(checkers...),
 		)
 		responseRecorder := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/ready", nil)
 
 		// when: calling the ready endpoint
 		handlers.ServeHTTP(responseRecorder, req)
@@ -469,7 +591,7 @@ func TestReadyHandler(t *testing.T) {
 			vital.WithReadyOptions(vital.WithOverallReadyTimeout(10*time.Millisecond)),
 		)
 		responseRecorder := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/ready", nil)
 
 		// when: calling the ready endpoint
 		handlers.ServeHTTP(responseRecorder, req)
@@ -513,6 +635,66 @@ func TestReadyHandler(t *testing.T) {
 		}
 	})
 
+	t.Run("non-cooperative checker does not block timeout response", func(t *testing.T) {
+		// given: a checker that ignores context cancellation and blocks
+		blockingChecker := &nonCooperativeChecker{
+			name:  "blocking-service",
+			delay: 250 * time.Millisecond,
+		}
+
+		handlers := vital.NewHealthHandler(
+			vital.WithCheckers(blockingChecker),
+			vital.WithReadyOptions(vital.WithOverallReadyTimeout(10*time.Millisecond)),
+		)
+
+		responseRecorder := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/ready", nil)
+
+		// when: calling the ready endpoint
+		startedAt := time.Now()
+
+		handlers.ServeHTTP(responseRecorder, req)
+
+		elapsed := time.Since(startedAt)
+
+		// then: response should return promptly without waiting for checker completion
+		if elapsed > 150*time.Millisecond {
+			t.Errorf("expected timeout response to return quickly, took %v", elapsed)
+		}
+
+		if responseRecorder.Code != http.StatusServiceUnavailable {
+			t.Errorf(
+				"handler returned wrong status code: got %v want %v",
+				responseRecorder.Code,
+				http.StatusServiceUnavailable,
+			)
+		}
+
+		var response vital.ReadyResponse
+
+		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
+		if err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if response.Status != vital.StatusError {
+			t.Errorf("expected overall status %v, got %v", vital.StatusError, response.Status)
+		}
+
+		if len(response.Checks) != 1 {
+			t.Fatalf("expected 1 check result, got %d", len(response.Checks))
+		}
+
+		check := response.Checks[0]
+		if check.Status != vital.StatusError {
+			t.Errorf("expected check status %v, got %v", vital.StatusError, check.Status)
+		}
+
+		if !strings.Contains(check.Message, "context deadline exceeded") {
+			t.Errorf("expected timeout message, got %q", check.Message)
+		}
+	})
+
 	t.Run("zero timeout", func(t *testing.T) {
 		// given: a checker with delay and zero timeout (no timeout applied)
 		checker := &mockChecker{
@@ -527,7 +709,7 @@ func TestReadyHandler(t *testing.T) {
 			vital.WithReadyOptions(vital.WithOverallReadyTimeout(0)),
 		)
 		responseRecorder := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/ready", nil)
 
 		// when: calling the ready endpoint
 		handlers.ServeHTTP(responseRecorder, req)
@@ -569,7 +751,7 @@ func TestReadyHandler(t *testing.T) {
 			[]vital.Checker{checker},
 		)
 		responseRecorder := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/health/ready", nil).WithContext(ctx)
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/health/ready", nil)
 
 		// when: calling the ready endpoint
 		handler(responseRecorder, req)
@@ -604,7 +786,7 @@ func TestReadyHandler(t *testing.T) {
 			[]vital.Checker{checker},
 		)
 		responseRecorder := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/ready", nil)
 
 		// when: calling the handler directly
 		handler(responseRecorder, req)
