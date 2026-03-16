@@ -17,8 +17,6 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/monkescience/yeet:v0.2.2
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -33,6 +31,8 @@ jobs:
           owner: ${{ github.repository_owner }}
 
       - name: Run yeet
-        run: yeet release
+        uses: docker://ghcr.io/monkescience/yeet:v0.2.2
+        with:
+          args: release
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
