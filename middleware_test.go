@@ -279,6 +279,42 @@ func TestRecovery(t *testing.T) {
 			t.Errorf("expected no log output, got: %s", buf.String())
 		}
 	})
+
+	t.Run("does not rewrite partially written responses", func(t *testing.T) {
+		// given: a handler that writes a partial response before panicking
+		var buf bytes.Buffer
+
+		logger := slog.New(slog.NewJSONHandler(&buf, nil))
+
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("partial"))
+
+			panic("write failed")
+		})
+
+		middleware := vital.Recovery(logger)
+		recoveredHandler := middleware(handler)
+
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/partial", nil)
+		rec := httptest.NewRecorder()
+
+		// when: the panic happens after bytes have been written
+		recoveredHandler.ServeHTTP(rec, req)
+
+		// then: the original response should remain untouched
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
+		}
+
+		if rec.Body.String() != "partial" {
+			t.Errorf("expected body %q, got %q", "partial", rec.Body.String())
+		}
+
+		logOutput := buf.String()
+		if !strings.Contains(logOutput, `"response_started":true`) {
+			t.Errorf("expected recovery log to note committed response, got: %s", logOutput)
+		}
+	})
 }
 
 func TestGetTraceID(t *testing.T) {

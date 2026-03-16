@@ -287,6 +287,40 @@ func TestRespondProblem(t *testing.T) {
 			t.Errorf("expected detail 'Invalid email format', got %v", result["detail"])
 		}
 	})
+
+	t.Run("falls back to internal server error when encoding fails", func(t *testing.T) {
+		// given: a problem detail that cannot be marshaled
+		problem := vital.NewProblemDetail(
+			http.StatusBadRequest,
+			"Bad Request",
+			vital.WithExtension("title", "reserved"),
+		)
+
+		recorder := httptest.NewRecorder()
+
+		// when: responding with the invalid problem detail
+		vital.RespondProblem(context.Background(), recorder, problem)
+
+		// then: it should fall back to a valid 500 problem response
+		if recorder.Code != http.StatusInternalServerError {
+			t.Fatalf("expected status code %d, got %d", http.StatusInternalServerError, recorder.Code)
+		}
+
+		var result map[string]any
+
+		err := json.Unmarshal(recorder.Body.Bytes(), &result)
+		if err != nil {
+			t.Fatalf("failed to unmarshal response: %v", err)
+		}
+
+		if result["status"] != float64(http.StatusInternalServerError) {
+			t.Errorf("expected fallback status 500, got %v", result["status"])
+		}
+
+		if result["title"] != "Internal Server Error" {
+			t.Errorf("expected fallback title, got %v", result["title"])
+		}
+	})
 }
 
 func TestCommonProblemConstructors(t *testing.T) {

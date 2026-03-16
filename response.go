@@ -10,12 +10,22 @@ import (
 	"net/http"
 )
 
+const (
+	fallbackProblemResponse = "{" +
+		`"type":"about:blank",` +
+		`"title":"Internal Server Error",` +
+		`"status":500,` +
+		`"detail":"failed to encode problem detail response"` +
+		"}\n"
+	fallbackJSONResponse = `{"status":"error"}` + "\n"
+)
+
 // ProblemDetail represents an RFC 9457 problem details response.
 // See https://datatracker.ietf.org/doc/html/rfc9457 for specification.
 type ProblemDetail struct {
 	// Type is a URI reference that identifies the problem type.
 	// When dereferenced, it should provide human-readable documentation.
-	// Defaults to "about:blank" when not specified.
+	// When omitted, RFC 9457 defines the semantics as "about:blank".
 	Type string `json:"type,omitempty"`
 
 	// Title is a short, human-readable summary of the problem type.
@@ -142,12 +152,21 @@ func (p ProblemDetail) MarshalJSON() ([]byte, error) {
 // RespondProblem writes a ProblemDetail as an HTTP response.
 // It sets the appropriate content type and status code.
 func RespondProblem(ctx context.Context, w http.ResponseWriter, problem *ProblemDetail) {
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(problem.Status)
+	err := writeJSONResponse(w, "application/problem+json", problem.Status, problem)
+	if err == nil {
+		return
+	}
 
-	err := json.NewEncoder(w).Encode(problem)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to encode problem detail response", slog.Any("error", err))
+	slog.ErrorContext(ctx, "failed to encode problem detail response", slog.Any("error", err))
+
+	fallbackErr := writeJSONBytes(
+		w,
+		"application/problem+json",
+		http.StatusInternalServerError,
+		[]byte(fallbackProblemResponse),
+	)
+	if fallbackErr != nil {
+		slog.ErrorContext(ctx, "failed to write fallback problem detail response", slog.Any("error", fallbackErr))
 	}
 }
 
@@ -213,4 +232,27 @@ func InternalServerError(detail string, opts ...ProblemOption) *ProblemDetail {
 // ServiceUnavailable creates a 503 Service Unavailable problem detail.
 func ServiceUnavailable(detail string, opts ...ProblemOption) *ProblemDetail {
 	return newProblem(http.StatusServiceUnavailable, "Service Unavailable", detail, opts...)
+}
+
+func writeJSONResponse(w http.ResponseWriter, contentType string, statusCode int, payload any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal json response: %w", err)
+	}
+
+	body = append(body, '\n')
+
+	return writeJSONBytes(w, contentType, statusCode, body)
+}
+
+func writeJSONBytes(w http.ResponseWriter, contentType string, statusCode int, body []byte) error {
+	w.Header().Set("Content-Type", contentType)
+	w.WriteHeader(statusCode)
+
+	_, err := w.Write(body)
+	if err != nil {
+		return fmt.Errorf("write json response: %w", err)
+	}
+
+	return nil
 }

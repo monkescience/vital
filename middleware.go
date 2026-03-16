@@ -90,13 +90,32 @@ func RequestLogger(logger *slog.Logger) Middleware {
 type responseWriter struct {
 	http.ResponseWriter
 
-	statusCode int
+	statusCode   int
+	wroteHeader  bool
+	bytesWritten int64
+	hijacked     bool
 }
 
 // WriteHeader captures the status code and calls the underlying WriteHeader.
 func (rw *responseWriter) WriteHeader(code int) {
-	rw.statusCode = code
+	if !rw.wroteHeader {
+		rw.statusCode = code
+		rw.wroteHeader = true
+	}
+
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *responseWriter) Write(data []byte) (int, error) {
+	if !rw.wroteHeader {
+		rw.WriteHeader(http.StatusOK)
+	}
+
+	written, err := rw.ResponseWriter.Write(data)
+	rw.bytesWritten += int64(written)
+
+	//nolint:wrapcheck // Delegating to underlying ResponseWriter, wrapping would lose context.
+	return written, err
 }
 
 func (rw *responseWriter) Unwrap() http.ResponseWriter {
@@ -109,6 +128,10 @@ func (rw *responseWriter) Flush() {
 		return
 	}
 
+	if !rw.wroteHeader {
+		rw.wroteHeader = true
+	}
+
 	flusher.Flush()
 }
 
@@ -117,6 +140,8 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if !ok {
 		return nil, nil, http.ErrNotSupported
 	}
+
+	rw.hijacked = true
 
 	//nolint:wrapcheck // Delegating to underlying ResponseWriter, wrapping would lose context
 	return hijacker.Hijack()
@@ -133,14 +158,28 @@ func (rw *responseWriter) Push(target string, opts *http.PushOptions) error {
 }
 
 func (rw *responseWriter) ReadFrom(reader io.Reader) (int64, error) {
-	readerFrom, ok := rw.ResponseWriter.(io.ReaderFrom)
-	if ok {
-		//nolint:wrapcheck // Delegating to underlying ResponseWriter, wrapping would lose context
-		return readerFrom.ReadFrom(reader)
+	if !rw.wroteHeader {
+		rw.WriteHeader(http.StatusOK)
 	}
 
-	//nolint:wrapcheck // Delegating to underlying ResponseWriter, wrapping would lose context
-	return io.Copy(rw.ResponseWriter, reader)
+	readerFrom, ok := rw.ResponseWriter.(io.ReaderFrom)
+	if ok {
+		written, err := readerFrom.ReadFrom(reader)
+		rw.bytesWritten += written
+
+		//nolint:wrapcheck // Delegating to underlying ResponseWriter, wrapping would lose context.
+		return written, err
+	}
+
+	written, err := io.Copy(rw.ResponseWriter, reader)
+	rw.bytesWritten += written
+
+	//nolint:wrapcheck // Delegating to underlying ResponseWriter, wrapping would lose context.
+	return written, err
+}
+
+func (rw *responseWriter) responseStarted() bool {
+	return rw.wroteHeader || rw.bytesWritten > 0 || rw.hijacked
 }
 
 // GetTraceID retrieves the trace ID from the request context.
@@ -177,6 +216,14 @@ func Recovery(logger *slog.Logger) Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
 
+			wrapped, ok := w.(*responseWriter)
+			if !ok {
+				wrapped = &responseWriter{
+					ResponseWriter: w,
+					statusCode:     http.StatusOK,
+				}
+			}
+
 			defer func() {
 				if err := recover(); err != nil {
 					logger.ErrorContext(
@@ -185,13 +232,19 @@ func Recovery(logger *slog.Logger) Middleware {
 						slog.Any("error", err),
 						slog.String("method", r.Method),
 						slog.String("path", r.URL.Path),
+						slog.Bool("response_started", wrapped.responseStarted()),
+						slog.Bool("hijacked", wrapped.hijacked),
 					)
 
-					RespondProblem(ctx, w, InternalServerError("internal server error"))
+					if wrapped.responseStarted() {
+						return
+					}
+
+					RespondProblem(ctx, wrapped, InternalServerError("internal server error"))
 				}
 			}()
 
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(wrapped, r)
 		})
 	}
 }

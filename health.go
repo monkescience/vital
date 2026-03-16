@@ -2,7 +2,6 @@ package vital
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -363,12 +362,16 @@ func respondJSON(
 	statusCode int,
 	payload any,
 ) {
-	writer.Header().Set("Content-Type", "application/json")
-	writer.WriteHeader(statusCode)
+	err := writeJSONResponse(writer, "application/json", statusCode, payload)
+	if err == nil {
+		return
+	}
 
-	err := json.NewEncoder(writer).Encode(payload)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to encode JSON response", slog.Any("error", err))
+	slog.ErrorContext(ctx, "failed to encode JSON response", slog.Any("error", err))
+
+	fallbackErr := writeJSONBytes(writer, "application/json", http.StatusInternalServerError, []byte(fallbackJSONResponse))
+	if fallbackErr != nil {
+		slog.ErrorContext(ctx, "failed to write fallback JSON response", slog.Any("error", fallbackErr))
 	}
 }
 
