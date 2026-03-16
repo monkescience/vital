@@ -8,6 +8,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	semconv "go.opentelemetry.io/otel/semconv/v1.28.0"
@@ -86,7 +87,7 @@ func newMetricsConfig(opts ...MetricsOption) metricsConfig {
 //
 // Features:
 //   - Creates a span for each HTTP request with standard HTTP semantic conventions
-//   - Propagates W3C traceparent headers (incoming and outgoing)
+//   - Propagates inbound W3C traceparent headers
 //   - Adds trace_id, span_id, and trace_flags to request context for log correlation
 func Tracing(opts ...TracingOption) Middleware {
 	cfg := newTracingConfig(opts...)
@@ -106,8 +107,6 @@ func Tracing(opts ...TracingOption) Middleware {
 				ctx = context.WithValue(ctx, TraceFlagsKey, spanCtx.TraceFlags().String())
 			}
 
-			cfg.propagator.Inject(ctx, propagation.HeaderCarrier(w.Header()))
-
 			wrapped := &responseWriter{
 				ResponseWriter: w,
 				statusCode:     http.StatusOK,
@@ -120,6 +119,10 @@ func Tracing(opts ...TracingOption) Middleware {
 				semconv.HTTPResponseStatusCodeKey.Int(wrapped.statusCode),
 				semconv.URLPathKey.String(r.URL.Path),
 			)
+
+			if wrapped.statusCode >= http.StatusInternalServerError {
+				span.SetStatus(codes.Error, http.StatusText(wrapped.statusCode))
+			}
 		})
 	}
 }

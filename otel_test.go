@@ -13,6 +13,7 @@ import (
 
 	"github.com/monkescience/vital"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -224,7 +225,7 @@ func TestTracing(t *testing.T) {
 		}
 	})
 
-	t.Run("propagates traceparent to response", func(t *testing.T) {
+	t.Run("does not propagate traceparent to response", func(t *testing.T) {
 		// given: tracing middleware with trace provider and propagator
 		spanExporter := tracetest.NewInMemoryExporter()
 		tp := sdktrace.NewTracerProvider(
@@ -246,20 +247,39 @@ func TestTracing(t *testing.T) {
 
 		wrappedHandler.ServeHTTP(rec, req)
 
-		// then: response should include traceparent
+		// then: response should not expose trace headers back to the client
 		traceparent := rec.Header().Get("Traceparent")
-		if traceparent == "" {
-			t.Fatal("expected traceparent header in response")
+		if traceparent != "" {
+			t.Fatalf("expected no traceparent header in response, got %q", traceparent)
 		}
+	})
+
+	t.Run("marks 5xx responses as span errors", func(t *testing.T) {
+		// given: tracing middleware with a failing handler
+		spanExporter := tracetest.NewInMemoryExporter()
+		tp := sdktrace.NewTracerProvider(
+			sdktrace.WithSyncer(spanExporter),
+		)
+
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		})
+
+		wrappedHandler := vital.Tracing(vital.WithTracerProvider(tp))(handler)
+
+		// when: processing the failing request
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+
+		wrappedHandler.ServeHTTP(rec, req)
 
 		spans := spanExporter.GetSpans()
 		if len(spans) != 1 {
 			t.Fatalf("expected 1 span, got %d", len(spans))
 		}
 
-		expectedTraceID := spans[0].SpanContext.TraceID().String()
-		if len(traceparent) < len(expectedTraceID) {
-			t.Errorf("traceparent too short: %s", traceparent)
+		if spans[0].Status.Code != codes.Error {
+			t.Errorf("expected span status %v, got %v", codes.Error, spans[0].Status.Code)
 		}
 	})
 
