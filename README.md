@@ -193,6 +193,10 @@ healthHandler := vital.NewHealthHandler(
 )
 ```
 
+Custom checkers should honor `ctx.Done()` and return promptly. If a checker ignores
+cancellation, the readiness endpoint still times out, but the checker may continue
+running briefly in the background.
+
 ### Health Check Response Format
 
 Liveness response:

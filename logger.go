@@ -94,7 +94,7 @@ func WithRegistry(registry *Registry) ContextHandlerOption {
 }
 
 // WithBuiltinKeys registers all built-in context keys from the vital library.
-// This includes keys used by vital's middleware (e.g., CorrelationIDKey).
+// This includes keys used by vital's middleware (e.g., TraceIDKey, SpanIDKey, TraceFlagsKey).
 func WithBuiltinKeys() ContextHandlerOption {
 	return func(h *ContextHandler) {
 		for _, key := range BuiltinKeys() {
@@ -121,7 +121,7 @@ func WithContextKeys(keys ...ContextKey) ContextHandlerOption {
 //
 //	handler := vital.NewContextHandler(
 //	    slog.NewJSONHandler(os.Stdout, nil),
-//	    vital.WithBuiltinKeys(),              // Include CorrelationIDKey
+//	    vital.WithBuiltinKeys(),              // Include trace context keys
 //	    vital.WithContextKeys(UserIDKey),     // Add custom keys
 //	)
 func NewContextHandler(handler slog.Handler, opts ...ContextHandlerOption) *ContextHandler {

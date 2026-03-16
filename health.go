@@ -40,6 +40,7 @@ type CheckResponse struct {
 }
 
 // Checker performs a health check and returns a status and optional message.
+// Implementations should honor ctx cancellation and return promptly.
 type Checker interface {
 	Name() string
 	Check(ctx context.Context) (Status, string)
