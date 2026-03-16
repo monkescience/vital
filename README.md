@@ -59,13 +59,16 @@ func main() {
 		),
 	)
 
-	// Create and run server
-	server := vital.NewServer(handler,
-		vital.WithPort(8080),
-		vital.WithLogger(logger),
-	)
+// Create and run server
+server := vital.NewServer(handler,
+	vital.WithPort(8080),
+	vital.WithLogger(logger),
+)
 
-	server.Run()
+if err := server.Run(); err != nil {
+	logger.Error("server stopped", slog.Any("error", err))
+	os.Exit(1)
+}
 }
 ```
 
@@ -95,9 +98,12 @@ server := vital.NewServer(handler,
 )
 
 // Start server (blocks until shutdown signal)
-server.Run()
+if err := server.Run(); err != nil {
+	logger.Error("server stopped", slog.Any("error", err))
+	os.Exit(1)
+}
 
-// Or manage lifecycle manually
+// Or manage lifecycle manually with Start/Stop
 go server.Start()
 // ... do other work ...
 server.Stop()
@@ -107,9 +113,10 @@ server.Stop()
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `WithPort(port)` | Set server port | Required |
+| `WithPort(port)` | Set server port | Required unless `server.Addr` is set directly |
 | `WithTLS(cert, key)` | Enable TLS with certificate paths | Disabled |
 | `WithShutdownTimeout(d)` | Graceful shutdown timeout | 20s |
+| `WithShutdownHooksTimeout(d)` | Timeout budget for shutdown hooks | Same as `WithShutdownTimeout` |
 | `WithShutdownFunc(fn)` | Register cleanup hooks run during shutdown | None |
 | `WithReadTimeout(d)` | Maximum duration for reading entire request | 30s |
 | `WithReadHeaderTimeout(d)` | Maximum duration for reading request headers | 10s |
@@ -255,7 +262,7 @@ handler := metrics(tracing(mux))
 
 Tracing features:
 - Creates spans for each HTTP request
-- Propagates W3C traceparent headers
+- Propagates inbound W3C traceparent headers
 - Adds `trace_id`, `span_id`, and `trace_flags` to request context
 
 Metrics features:
@@ -602,7 +609,10 @@ func main() {
 	)
 
 	logger.Info("starting server", slog.Int("port", 8080))
-	server.Run()
+	if err := server.Run(); err != nil {
+		logger.Error("server stopped", slog.Any("error", err))
+		os.Exit(1)
+	}
 }
 ```
 
@@ -612,10 +622,11 @@ func main() {
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `WithPort` | `int` | Required | Server port |
+| `WithPort` | `int` | Required unless `server.Addr` is set directly | Server port |
 | `WithTLS` | `string, string` | Disabled | Certificate and key paths |
 | `WithShutdownTimeout` | `time.Duration` | 20s | Graceful shutdown timeout |
-| `WithShutdownFunc` | `func(context.Context)` | None | Shutdown cleanup hook |
+| `WithShutdownHooksTimeout` | `time.Duration` | Same as `WithShutdownTimeout` | Shutdown hook timeout budget |
+| `WithShutdownFunc` | `func(context.Context) error` | None | Shutdown cleanup hook |
 | `WithReadTimeout` | `time.Duration` | 30s | Read timeout |
 | `WithReadHeaderTimeout` | `time.Duration` | 10s | Read header timeout |
 | `WithWriteTimeout` | `time.Duration` | 10s | Write timeout |

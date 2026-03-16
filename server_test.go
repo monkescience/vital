@@ -8,11 +8,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
-	"os/exec"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -154,6 +151,46 @@ func TestNewServer(t *testing.T) {
 	})
 }
 
+func TestServer_Validate(t *testing.T) {
+	t.Run("requires address before start", func(t *testing.T) {
+		// given: a server without an address
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+
+		server := vital.NewServer(handler)
+
+		// when: starting the server
+		err := server.Start()
+
+		// then: validation should fail early
+		if !errors.Is(err, vital.ErrServerAddrRequired) {
+			t.Fatalf("expected ErrServerAddrRequired, got %v", err)
+		}
+	})
+
+	t.Run("requires both TLS files", func(t *testing.T) {
+		// given: a server with an address but incomplete TLS config
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+
+		server := vital.NewServer(
+			handler,
+			vital.WithPort(getAvailablePort(t)),
+			vital.WithTLS("", "testdata/server.key"),
+		)
+
+		// when: validating the server
+		err := server.Validate()
+
+		// then: it should fail before trying to listen
+		if !errors.Is(err, vital.ErrIncompleteTLSConfig) {
+			t.Fatalf("expected ErrIncompleteTLSConfig, got %v", err)
+		}
+	})
+}
+
 func TestServer_HTTP(t *testing.T) {
 	t.Run("starts and serves HTTP requests", func(t *testing.T) {
 		// given: an HTTP server on a specific port
@@ -278,7 +315,7 @@ func TestServer_Stop(t *testing.T) {
 			handler,
 			vital.WithPort(port),
 			vital.WithShutdownTimeout(5*time.Second),
-			vital.WithShutdownFunc(func(ctx context.Context) {
+			vital.WithShutdownFunc(func(ctx context.Context) error {
 				if _, ok := ctx.Deadline(); ok {
 					sawDeadline.Store(true)
 				}
@@ -287,8 +324,10 @@ func TestServer_Stop(t *testing.T) {
 
 				calls = append(calls, "first")
 				mu.Unlock()
+
+				return nil
 			}),
-			vital.WithShutdownFunc(func(ctx context.Context) {
+			vital.WithShutdownFunc(func(ctx context.Context) error {
 				if _, ok := ctx.Deadline(); ok {
 					sawDeadline.Store(true)
 				}
@@ -297,6 +336,8 @@ func TestServer_Stop(t *testing.T) {
 
 				calls = append(calls, "second")
 				mu.Unlock()
+
+				return nil
 			}),
 			vital.WithLogger(slog.New(slog.DiscardHandler)),
 		)
@@ -327,6 +368,120 @@ func TestServer_Stop(t *testing.T) {
 
 		if calls[0] != "second" || calls[1] != "first" {
 			t.Errorf("expected shutdown hooks in reverse order, got %v", calls)
+		}
+	})
+
+	t.Run("returns shutdown hook errors", func(t *testing.T) {
+		// given: a running server with a failing shutdown hook
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+
+		port := getAvailablePort(t)
+		hookErr := errors.New("hook failed")
+
+		server := vital.NewServer(
+			handler,
+			vital.WithPort(port),
+			vital.WithShutdownFunc(func(ctx context.Context) error {
+				return hookErr
+			}),
+			vital.WithLogger(slog.New(slog.DiscardHandler)),
+		)
+
+		go func() {
+			_ = server.Start()
+		}()
+
+		waitForServer(t, fmt.Sprintf("http://localhost:%d", port))
+
+		// when: stopping the server
+		err := server.Stop()
+
+		// then: the hook error should be returned to the caller
+		if !errors.Is(err, hookErr) {
+			t.Fatalf("expected hook error, got %v", err)
+		}
+	})
+
+	t.Run("runs hooks with a fresh timeout budget", func(t *testing.T) {
+		// given: a slow in-flight request and a longer hook timeout
+		requestStarted := make(chan struct{})
+		releaseRequest := make(chan struct{})
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+		mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
+			close(requestStarted)
+			<-releaseRequest
+			w.WriteHeader(http.StatusOK)
+		})
+
+		port := getAvailablePort(t)
+
+		var hookDeadline time.Duration
+
+		server := vital.NewServer(
+			mux,
+			vital.WithPort(port),
+			vital.WithShutdownTimeout(50*time.Millisecond),
+			vital.WithShutdownHooksTimeout(200*time.Millisecond),
+			vital.WithShutdownFunc(func(ctx context.Context) error {
+				deadline, ok := ctx.Deadline()
+				if !ok {
+					t.Error("expected hook deadline")
+
+					return nil
+				}
+
+				hookDeadline = time.Until(deadline)
+
+				if ctx.Err() != nil {
+					t.Errorf("expected fresh hook context, got %v", ctx.Err())
+				}
+
+				return nil
+			}),
+			vital.WithLogger(slog.New(slog.DiscardHandler)),
+		)
+
+		go func() {
+			_ = server.Start()
+		}()
+
+		waitForServer(t, fmt.Sprintf("http://localhost:%d/health", port))
+
+		client := &http.Client{Timeout: time.Second}
+		slowURL := fmt.Sprintf("http://localhost:%d/slow", port)
+
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, slowURL, nil)
+		if err != nil {
+			t.Fatalf("failed to create slow request: %v", err)
+		}
+
+		go func() {
+			resp, requestErr := client.Do(req)
+			if requestErr == nil {
+				_ = resp.Body.Close()
+			}
+		}()
+
+		<-requestStarted
+
+		// when: stopping while the request is still in flight
+		err = server.Stop()
+
+		close(releaseRequest)
+
+		// then: shutdown should time out, but hooks should still get their own budget
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("expected shutdown timeout, got %v", err)
+		}
+
+		if hookDeadline < 150*time.Millisecond {
+			t.Fatalf("expected fresh hook timeout budget, got %v", hookDeadline)
 		}
 	})
 
@@ -371,104 +526,61 @@ func TestServer_Stop(t *testing.T) {
 }
 
 func TestServer_Run(t *testing.T) {
-	t.Run("runs shutdown funcs on graceful signal", func(t *testing.T) {
-		// given: a helper process that runs the server and receives a shutdown signal
-		hookFile := t.TempDir() + "/signal-hooks.txt"
+	t.Run("returns startup errors instead of exiting", func(t *testing.T) {
+		// given: a server with invalid startup configuration
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
 
-		// when: running the helper process
-		output, err := runServerRunHelper(t, "signal", hookFile)
-		// then: it should exit successfully and run hooks in reverse order
-		if err != nil {
-			t.Fatalf("expected helper to exit cleanly, got: %v\n%s", err, output)
-		}
+		server := vital.NewServer(handler, vital.WithLogger(slog.New(slog.DiscardHandler)))
 
-		contents, readErr := os.ReadFile(hookFile)
-		if readErr != nil {
-			t.Fatalf("failed to read shutdown hook file: %v", readErr)
-		}
+		// when: running the server
+		err := server.Run()
 
-		if string(contents) != "second\nfirst\n" {
-			t.Errorf("expected reverse-order shutdown hooks, got %q", string(contents))
+		// then: the startup error should be returned to the caller
+		if !errors.Is(err, vital.ErrServerAddrRequired) {
+			t.Fatalf("expected ErrServerAddrRequired, got %v", err)
 		}
 	})
 
-	t.Run("runs shutdown funcs on startup error", func(t *testing.T) {
-		// given: a helper process that fails during server startup
-		hookFile := t.TempDir() + "/startup-error-hooks.txt"
+	t.Run("stops gracefully when context is canceled", func(t *testing.T) {
+		// given: a running server controlled by context
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
 
-		// when: running the helper process
-		output, err := runServerRunHelper(t, "startup_error", hookFile)
+		port := getAvailablePort(t)
 
-		// then: it should exit with code 1 after running the shutdown hooks
-		var exitErr *exec.ExitError
-		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
-			t.Fatalf("expected helper to exit with status 1, got: %v\n%s", err, output)
-		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
-		contents, readErr := os.ReadFile(hookFile)
-		if readErr != nil {
-			t.Fatalf("failed to read shutdown hook file: %v", readErr)
-		}
-
-		if string(contents) != "cleanup\n" {
-			t.Errorf("expected startup error cleanup hook to run, got %q", string(contents))
-		}
-	})
-}
-
-func TestServerRunHelper(t *testing.T) {
-	scenario := os.Getenv("VITAL_SERVER_RUN_SCENARIO")
-	if scenario == "" {
-		return
-	}
-
-	hookFile := os.Getenv("VITAL_SERVER_HOOK_FILE")
-	if hookFile == "" {
-		t.Fatal("expected hook file path")
-	}
-
-	logger := slog.New(slog.DiscardHandler)
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	switch scenario {
-	case "signal":
 		server := vital.NewServer(
 			handler,
-			vital.WithPort(0),
-			vital.WithShutdownTimeout(time.Second),
-			vital.WithShutdownFunc(func(ctx context.Context) {
-				appendHookCall(hookFile, "first")
-			}),
-			vital.WithShutdownFunc(func(ctx context.Context) {
-				appendHookCall(hookFile, "second")
-			}),
-			vital.WithLogger(logger),
+			vital.WithPort(port),
+			vital.WithLogger(slog.New(slog.DiscardHandler)),
 		)
+
+		runErr := make(chan error, 1)
 
 		go func() {
-			time.Sleep(200 * time.Millisecond)
-
-			_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+			runErr <- server.RunContext(ctx)
 		}()
 
-		server.Run()
-	case "startup_error":
-		server := vital.NewServer(
-			handler,
-			vital.WithPort(0),
-			vital.WithTLS("testdata/missing.crt", "testdata/missing.key"),
-			vital.WithShutdownFunc(func(ctx context.Context) {
-				appendHookCall(hookFile, "cleanup")
-			}),
-			vital.WithLogger(logger),
-		)
+		waitForServer(t, fmt.Sprintf("http://localhost:%d", port))
 
-		server.Run()
-	default:
-		t.Fatalf("unknown helper scenario %q", scenario)
-	}
+		// when: canceling the run context
+		cancel()
+
+		// then: the server should stop without error
+		select {
+		case err := <-runErr:
+			if err != nil {
+				t.Fatalf("expected graceful shutdown, got %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for RunContext to return")
+		}
+	})
 }
 
 func TestServerIntegration_HTTP(t *testing.T) {
@@ -710,34 +822,4 @@ func waitForServer(t *testing.T, url string) {
 	}
 
 	t.Fatalf("server did not become ready at %s", url)
-}
-
-func runServerRunHelper(t *testing.T, scenario, hookFile string) ([]byte, error) {
-	t.Helper()
-
-	cmd := exec.CommandContext(context.Background(), os.Args[0], "-test.run=TestServerRunHelper")
-
-	cmd.Env = append(
-		os.Environ(),
-		"VITAL_SERVER_RUN_SCENARIO="+scenario,
-		"VITAL_SERVER_HOOK_FILE="+hookFile,
-	)
-
-	return cmd.CombinedOutput()
-}
-
-func appendHookCall(hookFile, name string) {
-	file, err := os.OpenFile(hookFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		panic(err)
-	}
-
-	defer func() {
-		_ = file.Close()
-	}()
-
-	_, err = file.WriteString(name + "\n")
-	if err != nil {
-		panic(err)
-	}
 }
