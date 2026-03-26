@@ -658,3 +658,37 @@ func TestNewHandlerFromConfig(t *testing.T) {
 		}
 	})
 }
+
+func BenchmarkRegistryKeys(b *testing.B) {
+	registry := vital.NewRegistry()
+	registry.Register(vital.TraceIDKey)
+	registry.Register(vital.SpanIDKey)
+	registry.Register(vital.TraceFlagsKey)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for range b.N {
+		_ = registry.Keys()
+	}
+}
+
+func BenchmarkContextHandlerHandle(b *testing.B) {
+	var buf bytes.Buffer
+
+	baseHandler := slog.NewJSONHandler(&buf, nil)
+	handler := vital.NewContextHandler(baseHandler, vital.WithBuiltinKeys())
+	logger := slog.New(handler)
+
+	ctx := context.WithValue(context.Background(), vital.TraceIDKey, "4bf92f3577b34da6a3ce929d0e0e4736")
+	ctx = context.WithValue(ctx, vital.SpanIDKey, "00f067aa0ba902b7")
+	ctx = context.WithValue(ctx, vital.TraceFlagsKey, "01")
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for range b.N {
+		buf.Reset()
+		logger.InfoContext(ctx, "benchmark")
+	}
+}

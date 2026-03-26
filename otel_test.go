@@ -519,6 +519,51 @@ func mustMetricsMiddleware(t *testing.T, opts ...vital.MetricsOption) vital.Midd
 	return middleware
 }
 
+func BenchmarkMiddlewareChain(b *testing.B) {
+	spanExporter := tracetest.NewInMemoryExporter()
+	tracerProvider := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(spanExporter),
+	)
+
+	metricReader := sdkmetric.NewManualReader()
+	meterProvider := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(metricReader),
+	)
+
+	logger := slog.New(slog.NewJSONHandler(nopWriter{}, nil))
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	metricsMiddleware, err := vital.Metrics(vital.WithMeterProvider(meterProvider))
+	if err != nil {
+		b.Fatalf("failed to create metrics middleware: %v", err)
+	}
+
+	chain := vital.Recovery(logger)(
+		vital.Tracing(vital.WithTracerProvider(tracerProvider))(
+			metricsMiddleware(
+				vital.RequestLogger(logger)(handler),
+			),
+		),
+	)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bench", nil)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for range b.N {
+		rec := httptest.NewRecorder()
+		chain.ServeHTTP(rec, req)
+	}
+}
+
+type nopWriter struct{}
+
+func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
+
 func assertAttributeValue(t *testing.T, attrs []attribute.KeyValue, key attribute.Key, expected string) {
 	t.Helper()
 
