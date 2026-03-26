@@ -1,10 +1,13 @@
 package vital_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +15,47 @@ import (
 
 	"github.com/monkescience/vital"
 )
+
+// failingHijackRecorder wraps httptest.ResponseRecorder and implements
+// http.Hijacker with a Hijack that always returns an error.
+type failingHijackRecorder struct {
+	*httptest.ResponseRecorder
+}
+
+func (f *failingHijackRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return nil, nil, errors.New("hijack failed")
+}
+
+// successfulHijackRecorder wraps httptest.ResponseRecorder and implements
+// http.Hijacker with a Hijack that succeeds using a pipe connection.
+type successfulHijackRecorder struct {
+	*httptest.ResponseRecorder
+	conn net.Conn
+}
+
+func (s *successfulHijackRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return s.conn, bufio.NewReadWriter(
+		bufio.NewReader(s.conn), bufio.NewWriter(s.conn),
+	), nil
+}
+
+// writeHeaderSpyRecorder wraps httptest.ResponseRecorder and tracks
+// whether WriteHeader was called on the underlying writer.
+type writeHeaderSpyRecorder struct {
+	*httptest.ResponseRecorder
+	writeHeaderCalled bool
+	writeHeaderCode   int
+}
+
+func (s *writeHeaderSpyRecorder) WriteHeader(code int) {
+	s.writeHeaderCalled = true
+	s.writeHeaderCode = code
+	s.ResponseRecorder.WriteHeader(code)
+}
+
+func (s *writeHeaderSpyRecorder) Flush() {
+	s.ResponseRecorder.Flush()
+}
 
 func TestBasicAuth(t *testing.T) {
 	const (
@@ -315,6 +359,102 @@ func TestRecovery(t *testing.T) {
 			t.Errorf("expected recovery log to note committed response, got: %s", logOutput)
 		}
 	})
+
+	t.Run("recovers from panic after failed hijack", func(t *testing.T) {
+		// given: a handler that attempts hijack (which fails) then panics
+		var buf bytes.Buffer
+
+		logger := slog.New(slog.NewJSONHandler(&buf, nil))
+
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				t.Fatal("expected response writer to implement http.Hijacker")
+			}
+
+			_, _, err := hijacker.Hijack()
+			if err == nil {
+				t.Fatal("expected hijack to fail")
+			}
+
+			panic("after failed hijack")
+		})
+
+		middleware := vital.Recovery(logger)
+		recoveredHandler := middleware(handler)
+
+		rec := &failingHijackRecorder{
+			ResponseRecorder: httptest.NewRecorder(),
+		}
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/hijack-fail", nil)
+
+		// when: the handler panics after a failed hijack attempt
+		recoveredHandler.ServeHTTP(rec, req)
+
+		// then: recovery should send a 500 error response since the connection was NOT hijacked
+		if rec.Code != http.StatusInternalServerError {
+			t.Errorf("expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+
+		logOutput := buf.String()
+		if !strings.Contains(logOutput, "panic recovered") {
+			t.Errorf("expected log to contain 'panic recovered', got: %s", logOutput)
+		}
+
+		if !strings.Contains(logOutput, `"hijacked":false`) {
+			t.Errorf("expected hijacked to be false in log, got: %s", logOutput)
+		}
+	})
+
+	t.Run("does not write error response after successful hijack", func(t *testing.T) {
+		// given: a handler that successfully hijacks then panics
+		var buf bytes.Buffer
+
+		logger := slog.New(slog.NewJSONHandler(&buf, nil))
+
+		serverConn, clientConn := net.Pipe()
+
+		defer func() { _ = serverConn.Close() }()
+		defer func() { _ = clientConn.Close() }()
+
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				t.Fatal("expected response writer to implement http.Hijacker")
+			}
+
+			conn, _, err := hijacker.Hijack()
+			if err != nil {
+				t.Fatalf("expected hijack to succeed, got: %v", err)
+			}
+
+			defer func() { _ = conn.Close() }()
+
+			panic("after successful hijack")
+		})
+
+		middleware := vital.Recovery(logger)
+		recoveredHandler := middleware(handler)
+
+		rec := &successfulHijackRecorder{
+			ResponseRecorder: httptest.NewRecorder(),
+			conn:             serverConn,
+		}
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/hijack-ok", nil)
+
+		// when: the handler panics after a successful hijack
+		recoveredHandler.ServeHTTP(rec, req)
+
+		// then: recovery should NOT attempt to write an error response (connection is hijacked)
+		logOutput := buf.String()
+		if !strings.Contains(logOutput, `"hijacked":true`) {
+			t.Errorf("expected hijacked to be true in log, got: %s", logOutput)
+		}
+
+		if !strings.Contains(logOutput, `"response_started":true`) {
+			t.Errorf("expected response_started to be true in log, got: %s", logOutput)
+		}
+	})
 }
 
 func TestGetTraceID(t *testing.T) {
@@ -342,6 +482,45 @@ func TestGetTraceID(t *testing.T) {
 		// then: it should return an empty string
 		if traceID != "" {
 			t.Errorf("expected empty string, got %q", traceID)
+		}
+	})
+}
+
+func TestResponseWriterFlush(t *testing.T) {
+	t.Run("flush delegates WriteHeader to underlying writer", func(t *testing.T) {
+		// given: a handler that flushes without explicitly calling WriteHeader
+		spy := &writeHeaderSpyRecorder{
+			ResponseRecorder: httptest.NewRecorder(),
+		}
+
+		var buf bytes.Buffer
+
+		logger := slog.New(slog.NewJSONHandler(&buf, nil))
+
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			flusher, ok := w.(http.Flusher)
+			if !ok {
+				t.Fatal("expected response writer to implement http.Flusher")
+			}
+
+			flusher.Flush()
+		})
+
+		middleware := vital.RequestLogger(logger)
+		loggedHandler := middleware(handler)
+
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/flush", nil)
+
+		// when: the handler flushes
+		loggedHandler.ServeHTTP(spy, req)
+
+		// then: WriteHeader should have been called on the underlying writer with 200
+		if !spy.writeHeaderCalled {
+			t.Error("expected WriteHeader to be called on underlying writer after Flush")
+		}
+
+		if spy.writeHeaderCode != http.StatusOK {
+			t.Errorf("expected WriteHeader code %d, got %d", http.StatusOK, spy.writeHeaderCode)
 		}
 	})
 }

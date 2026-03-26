@@ -130,7 +130,7 @@ func (rw *responseWriter) Flush() {
 	}
 
 	if !rw.wroteHeader {
-		rw.wroteHeader = true
+		rw.WriteHeader(http.StatusOK)
 	}
 
 	flusher.Flush()
@@ -142,10 +142,15 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 		return nil, nil, http.ErrNotSupported
 	}
 
+	conn, brw, err := hijacker.Hijack()
+	if err != nil {
+		//nolint:wrapcheck // Delegating to underlying ResponseWriter, wrapping would lose context
+		return nil, nil, err
+	}
+
 	rw.hijacked = true
 
-	//nolint:wrapcheck // Delegating to underlying ResponseWriter, wrapping would lose context
-	return hijacker.Hijack()
+	return conn, brw, nil
 }
 
 func (rw *responseWriter) Push(target string, opts *http.PushOptions) error {
