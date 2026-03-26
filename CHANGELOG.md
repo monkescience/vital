@@ -1,5 +1,20 @@
 # Changelog
 
+## [v0.2.0](https://github.com/monkescience/vital/compare/v0.1.0...v0.2.0) (2026-03-26)
+
+### ⚠ BREAKING CHANGES
+
+- **server:** return lifecycle errors and harden shutdown hooks ([f499d5f](https://github.com/monkescience/vital/commit/f499d5fbf321708cd22b8f70e4b41428b83fba5b))
+### Features
+
+- **server:** return lifecycle errors and harden shutdown hooks ([f499d5f](https://github.com/monkescience/vital/commit/f499d5fbf321708cd22b8f70e4b41428b83fba5b))
+### Bug Fixes
+
+- **http:** correct Hijack flag and Flush header delegation in response wrapper ([abf2cc3](https://github.com/monkescience/vital/commit/abf2cc3fea47d47760ad23916e675c29ef70f966))
+- **http:** prevent duplicate WriteHeader delegation in response wrapper ([76ae647](https://github.com/monkescience/vital/commit/76ae6470b6df8357f81df2a26a0d860e8dda3477))
+- **otel:** keep trace propagation inbound only ([edb8529](https://github.com/monkescience/vital/commit/edb85293bf44e9e36d7c2168e0d91d740484e6d8))
+- **http:** harden panic recovery and JSON responses ([fb4bf4a](https://github.com/monkescience/vital/commit/fb4bf4afaa20a24c78a6a4322286003819b6c646))
+
 ## [0.1.0](https://github.com/monkescience/vital/compare/v0.0.1...v0.1.0) (2026-03-13)
 
 
