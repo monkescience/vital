@@ -98,11 +98,12 @@ type responseWriter struct {
 
 // WriteHeader captures the status code and calls the underlying WriteHeader.
 func (rw *responseWriter) WriteHeader(code int) {
-	if !rw.wroteHeader {
-		rw.statusCode = code
-		rw.wroteHeader = true
+	if rw.wroteHeader {
+		return
 	}
 
+	rw.statusCode = code
+	rw.wroteHeader = true
 	rw.ResponseWriter.WriteHeader(code)
 }
 
