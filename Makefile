@@ -1,12 +1,15 @@
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 
-.PHONY: test lint fmt build clean mod-tidy coverage coverage-html coverage-total help
+.PHONY: test bench lint fmt build clean mod-tidy coverage coverage-html coverage-total help
 
 help: ## Show help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
 
 test: ## Run tests
 	go test -race ./...
+
+bench: ## Run benchmarks
+	go test -bench=. -benchmem -count=5 -run=^$$ ./...
 
 build: ## Build all packages
 	go build ./...
