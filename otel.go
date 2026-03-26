@@ -107,10 +107,7 @@ func Tracing(opts ...TracingOption) Middleware {
 				ctx = context.WithValue(ctx, TraceFlagsKey, spanCtx.TraceFlags().String())
 			}
 
-			wrapped := &responseWriter{
-				ResponseWriter: w,
-				statusCode:     http.StatusOK,
-			}
+			wrapped := wrapResponseWriter(w)
 
 			next.ServeHTTP(wrapped, r.WithContext(ctx))
 
@@ -148,10 +145,7 @@ func Metrics(opts ...MetricsOption) (Middleware, error) {
 	return func(next http.Handler) http.Handler {
 		//nolint:varnamelen // w and r are conventional names for http.ResponseWriter and *http.Request
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			wrapped := &responseWriter{
-				ResponseWriter: w,
-				statusCode:     http.StatusOK,
-			}
+			wrapped := wrapResponseWriter(w)
 
 			start := time.Now()
 

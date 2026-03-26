@@ -60,13 +60,8 @@ func RequestLogger(logger *slog.Logger) Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 
-			// Wrap the ResponseWriter to capture the status code
-			wrapped := &responseWriter{
-				ResponseWriter: w,
-				statusCode:     http.StatusOK,
-			}
+			wrapped := wrapResponseWriter(w)
 
-			// Call the next handler
 			next.ServeHTTP(wrapped, r)
 
 			duration := time.Since(start)
@@ -94,6 +89,17 @@ type responseWriter struct {
 	wroteHeader  bool
 	bytesWritten int64
 	hijacked     bool
+}
+
+func wrapResponseWriter(w http.ResponseWriter) *responseWriter {
+	if rw, ok := w.(*responseWriter); ok {
+		return rw
+	}
+
+	return &responseWriter{
+		ResponseWriter: w,
+		statusCode:     http.StatusOK,
+	}
 }
 
 // WriteHeader captures the status code and calls the underlying WriteHeader.
@@ -222,13 +228,7 @@ func Recovery(logger *slog.Logger) Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
 
-			wrapped, ok := w.(*responseWriter)
-			if !ok {
-				wrapped = &responseWriter{
-					ResponseWriter: w,
-					statusCode:     http.StatusOK,
-				}
-			}
+			wrapped := wrapResponseWriter(w)
 
 			defer func() {
 				if err := recover(); err != nil {

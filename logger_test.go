@@ -268,6 +268,29 @@ func TestRegistry(t *testing.T) {
 		}
 	})
 
+	t.Run("reflects keys registered after first access", func(t *testing.T) {
+		// given: a registry with one key already accessed
+		registry := vital.NewRegistry()
+
+		key1 := vital.ContextKey{Name: "key1"}
+		registry.Register(key1)
+
+		keys := registry.Keys()
+		if len(keys) != 1 {
+			t.Fatalf("expected 1 key, got %d", len(keys))
+		}
+
+		// when: registering a new key after Keys() was called
+		key2 := vital.ContextKey{Name: "key2"}
+		registry.Register(key2)
+
+		// then: subsequent Keys() call should include the new key
+		keys = registry.Keys()
+		if len(keys) != 2 {
+			t.Errorf("expected 2 keys after registering second key, got %d", len(keys))
+		}
+	})
+
 	t.Run("returns all registered keys", func(t *testing.T) {
 		// given: a registry with multiple keys
 		registry := vital.NewRegistry()

@@ -278,13 +278,17 @@ func (server *Server) StopContext(ctx context.Context) error {
 }
 
 func (server *Server) runShutdownFuncsWithTimeout(ctx context.Context) error {
-	hooksTimeout := server.shutdownHooksTimeout
-	if hooksTimeout <= 0 {
-		hooksTimeout = server.shutdownTimeout
-	}
+	if server.shutdownHooksTimeout > 0 {
+		var cancel context.CancelFunc
 
-	ctx, cancel := context.WithTimeout(withoutCancelOrBackground(ctx), hooksTimeout)
-	defer cancel()
+		ctx, cancel = context.WithTimeout(withoutCancelOrBackground(ctx), server.shutdownHooksTimeout)
+		defer cancel()
+	} else if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+
+		ctx, cancel = context.WithTimeout(withoutCancelOrBackground(ctx), server.shutdownTimeout)
+		defer cancel()
+	}
 
 	return server.runShutdownFuncs(ctx)
 }

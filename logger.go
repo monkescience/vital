@@ -32,8 +32,9 @@ var TraceFlagsKey = ContextKey{Name: "trace_flags"}
 // Registry manages a collection of context keys to extract and log.
 // Each ContextHandler can have its own Registry for isolation.
 type Registry struct {
-	keys  map[ContextKey]struct{}
-	mutex sync.RWMutex
+	keys   map[ContextKey]struct{}
+	cached []ContextKey
+	mutex  sync.RWMutex
 }
 
 // NewRegistry creates a new empty Registry.
@@ -50,17 +51,36 @@ func (r *Registry) Register(key ContextKey) {
 	defer r.mutex.Unlock()
 
 	r.keys[key] = struct{}{}
+	r.cached = nil
 }
 
 // Keys returns all registered keys as a slice for iteration.
+// The result is cached and invalidated when new keys are registered.
 func (r *Registry) Keys() []ContextKey {
 	r.mutex.RLock()
-	defer r.mutex.RUnlock()
+
+	if r.cached != nil {
+		keys := r.cached
+		r.mutex.RUnlock()
+
+		return keys
+	}
+
+	r.mutex.RUnlock()
+
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	if r.cached != nil {
+		return r.cached
+	}
 
 	keys := make([]ContextKey, 0, len(r.keys))
 	for key := range r.keys {
 		keys = append(keys, key)
 	}
+
+	r.cached = keys
 
 	return keys
 }

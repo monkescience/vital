@@ -485,6 +485,76 @@ func TestServer_Stop(t *testing.T) {
 		}
 	})
 
+	t.Run("hooks share remaining shutdown budget by default", func(t *testing.T) {
+		// given: a slow in-flight request and NO explicit hooks timeout
+		requestStarted := make(chan struct{})
+		releaseRequest := make(chan struct{})
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+		mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
+			close(requestStarted)
+			<-releaseRequest
+			w.WriteHeader(http.StatusOK)
+		})
+
+		port := getAvailablePort(t)
+
+		var hookCtxErr error
+
+		server := vital.NewServer(
+			mux,
+			vital.WithPort(port),
+			vital.WithShutdownTimeout(50*time.Millisecond),
+			vital.WithShutdownFunc(func(ctx context.Context) error {
+				hookCtxErr = ctx.Err()
+
+				return nil
+			}),
+			vital.WithLogger(slog.New(slog.DiscardHandler)),
+		)
+
+		go func() {
+			_ = server.Start()
+		}()
+
+		waitForServer(t, fmt.Sprintf("http://localhost:%d/health", port))
+
+		client := &http.Client{Timeout: time.Second}
+		slowURL := fmt.Sprintf("http://localhost:%d/slow", port)
+
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, slowURL, nil)
+		if err != nil {
+			t.Fatalf("failed to create slow request: %v", err)
+		}
+
+		go func() {
+			resp, requestErr := client.Do(req)
+			if requestErr == nil {
+				_ = resp.Body.Close()
+			}
+		}()
+
+		<-requestStarted
+
+		// when: stopping while the request is still in flight (no explicit hooks timeout)
+		err = server.Stop()
+
+		close(releaseRequest)
+
+		// then: shutdown should time out, and hooks should also see expired context
+		// since they share the remaining budget (which is zero after HTTP shutdown timed out)
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("expected shutdown timeout, got %v", err)
+		}
+
+		if !errors.Is(hookCtxErr, context.DeadlineExceeded) {
+			t.Fatalf("expected hook context to be expired (shared budget), got %v", hookCtxErr)
+		}
+	})
+
 	t.Run("respects shutdown timeout", func(t *testing.T) {
 		// given: a server with a short shutdown timeout and a slow endpoint
 		mux := http.NewServeMux()
