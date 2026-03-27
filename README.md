@@ -6,7 +6,7 @@ Production-ready HTTP server utilities for Go with built-in observability, healt
 
 - **Server Management**: Graceful shutdown, TLS support, configurable timeouts
 - **Health Checks**: Liveness, startup, and readiness endpoints with custom checkers
-- **Middleware**: Timeout, tracing, metrics, request logging, recovery, basic auth
+- **Middleware**: Timeout, tracing, metrics, request logging, recovery, basic auth, body size limit
 - **Error Responses**: RFC 9457 ProblemDetail for consistent error handling
 - **Structured Logging**: Context-aware logging with trace correlation
 
@@ -109,6 +109,30 @@ go server.Start()
 server.Stop()
 ```
 
+### Context-Based Lifecycle
+
+For programmatic control (useful in tests or when embedding the server):
+
+```go
+// Validate configuration before starting
+if err := server.Validate(); err != nil {
+	log.Fatal(err)
+}
+
+// Use context-based lifecycle control
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+
+go func() {
+	if err := server.RunContext(ctx); err != nil {
+		logger.Error("server stopped", slog.Any("error", err))
+	}
+}()
+
+// Shut down with a specific context
+server.StopContext(ctx)
+```
+
 ### Server Options
 
 | Option | Description | Default |
@@ -142,6 +166,16 @@ This creates three endpoints:
 - `GET /health/live` - Liveness probe (always returns 200 OK)
 - `GET /health/started` - Startup probe (returns 200 OK by default)
 - `GET /health/ready` - Readiness probe (runs health checks)
+
+### Standalone Health Handlers
+
+For custom routing, use the individual handler functions directly:
+
+```go
+mux.HandleFunc("GET /healthz", vital.LiveHandlerFunc())
+mux.HandleFunc("GET /ready", vital.ReadyHandlerFunc("1.0.0", "production", checkers))
+mux.HandleFunc("GET /started", vital.StartedHandlerFunc(startedFunc))
+```
 
 ### Startup Probe
 
@@ -331,6 +365,18 @@ handler := vital.BasicAuth("admin", "secret", "Admin Area")(mux)
 
 Uses constant-time comparison to prevent timing attacks.
 
+### Body Size Limit
+
+Limit request body size to prevent oversized payloads:
+
+```go
+handler := vital.MaxBytesBody(1 << 20)(mux) // 1 MB limit
+```
+
+If `Content-Length` exceeds the limit, responds immediately with `413 Request Entity Too Large`.
+For chunked requests, wraps the body with `http.MaxBytesReader`.
+A limit of 0 or negative disables the check.
+
 ### Middleware Chaining
 
 Chain multiple middleware together (applied right-to-left):
@@ -355,11 +401,12 @@ handler := vital.Recovery(logger)(
 ```
 
 Recommended order (innermost to outermost):
-1. Timeout - enforce request deadlines
-2. RequestLogger - log requests (with tracing context)
-3. Metrics - record request duration
-4. Tracing - create and propagate spans
-5. Recovery - catch panics
+1. MaxBytesBody - reject oversized bodies
+2. Timeout - enforce request deadlines
+3. RequestLogger - log requests (with tracing context)
+4. Metrics - record request duration
+5. Tracing - create and propagate spans
+6. Recovery - catch panics
 
 ### Chi Example
 
@@ -419,11 +466,23 @@ vital.RespondProblem(r.Context(), w, vital.Forbidden("insufficient permissions")
 // 404 Not Found
 vital.RespondProblem(r.Context(), w, vital.NotFound("user not found"))
 
+// 405 Method Not Allowed
+vital.RespondProblem(r.Context(), w, vital.MethodNotAllowed("GET not supported"))
+
 // 409 Conflict
 vital.RespondProblem(r.Context(), w, vital.Conflict("email already exists"))
 
+// 410 Gone
+vital.RespondProblem(r.Context(), w, vital.Gone("resource has been removed"))
+
+// 413 Request Entity Too Large
+vital.RespondProblem(r.Context(), w, vital.RequestEntityTooLarge("payload exceeds 1 MB"))
+
 // 422 Unprocessable Entity
 vital.RespondProblem(r.Context(), w, vital.UnprocessableEntity("validation failed"))
+
+// 429 Too Many Requests
+vital.RespondProblem(r.Context(), w, vital.TooManyRequests("rate limit exceeded"))
 
 // 500 Internal Server Error
 vital.RespondProblem(r.Context(), w, vital.InternalServerError("database error"))
@@ -636,6 +695,17 @@ func main() {
 | `WithWriteTimeout` | `time.Duration` | 10s | Write timeout |
 | `WithIdleTimeout` | `time.Duration` | 120s | Idle timeout |
 | `WithLogger` | `*slog.Logger` | `slog.Default()` | Structured logger |
+
+### Server Methods
+
+| Method | Description |
+|--------|-------------|
+| `Run()` | Starts server and blocks until SIGINT/SIGTERM |
+| `RunContext(ctx)` | Like `Run` but uses the provided context instead of signal handling |
+| `Start()` | Begins serving (blocks until stop or error) |
+| `Stop()` | Gracefully shuts down with the configured timeout |
+| `StopContext(ctx)` | Like `Stop` but accepts a context for the shutdown window |
+| `Validate()` | Checks configuration before starting (called automatically by `Start`) |
 
 ### Health Check Options
 
