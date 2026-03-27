@@ -182,9 +182,9 @@ func TestTracing(t *testing.T) {
 		var capturedTraceID, capturedSpanID, capturedTraceFlags string
 
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			capturedTraceID = vital.GetTraceID(r.Context())
-			capturedSpanID = vital.GetSpanID(r.Context())
-			capturedTraceFlags = vital.GetTraceFlags(r.Context())
+			capturedTraceID, _ = r.Context().Value(vital.TraceIDKey).(string)
+			capturedSpanID, _ = r.Context().Value(vital.SpanIDKey).(string)
+			capturedTraceFlags, _ = r.Context().Value(vital.TraceFlagsKey).(string)
 
 			w.WriteHeader(http.StatusOK)
 		})
