@@ -92,13 +92,14 @@ func newMetricsConfig(opts ...MetricsOption) metricsConfig {
 func Tracing(opts ...TracingOption) Middleware {
 	cfg := newTracingConfig(opts...)
 	tracer := cfg.tracerProvider.Tracer(instrumentationName)
+	spanKindServer := trace.WithSpanKind(trace.SpanKindServer)
 
 	return func(next http.Handler) http.Handler {
 		//nolint:varnamelen // w and r are conventional names for http.ResponseWriter and *http.Request
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := cfg.propagator.Extract(r.Context(), propagation.HeaderCarrier(r.Header))
 
-			ctx, span := tracer.Start(ctx, "HTTP "+r.Method, trace.WithSpanKind(trace.SpanKindServer))
+			ctx, span := tracer.Start(ctx, "HTTP "+r.Method, spanKindServer)
 			defer span.End()
 
 			if spanCtx := span.SpanContext(); spanCtx.IsValid() {
@@ -164,10 +165,10 @@ func recordDurationMetric(
 	start time.Time,
 ) {
 	duration := time.Since(start).Seconds()
-	attrs := []attribute.KeyValue{
+	attrs := attribute.NewSet(
 		semconv.HTTPRequestMethodKey.String(r.Method),
 		semconv.HTTPResponseStatusCodeKey.Int(statusCode),
-	}
+	)
 
-	histogram.Record(ctx, duration, metric.WithAttributes(attrs...))
+	histogram.Record(ctx, duration, metric.WithAttributeSet(attrs))
 }
