@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.3.0](https://github.com/monkescience/vital/compare/v0.2.1...v0.3.0) (2026-03-27)
+
+### ⚠ BREAKING CHANGES
+
+- split middleware into per-file layout and remove trace context getters ([013bba6](https://github.com/monkescience/vital/commit/013bba685a74175ce5633ae7b427524d991329bd))
+
 ## [v0.2.1](https://github.com/monkescience/vital/compare/v0.2.0...v0.2.1) (2026-03-27)
 
 ### Features
