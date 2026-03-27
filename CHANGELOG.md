@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.2.1](https://github.com/monkescience/vital/compare/v0.2.0...v0.2.1) (2026-03-27)
+
+### Features
+
+- add body size limit middleware ([18710c0](https://github.com/monkescience/vital/commit/18710c02fd56854d85da040a439555a5a6dfb0f0))
+### Bug Fixes
+
+- **deps:** update opentelemetry-go monorepo to v1.42.0 (#18) ([3e22020](https://github.com/monkescience/vital/commit/3e2202088afbad61cc1d3e118c227cf518d23b31))
+### Performance Improvements
+
+- reduce middleware allocations in OTel instrumentation ([8451122](https://github.com/monkescience/vital/commit/845112290644d5d4437dc6d5760372263a4d9b75))
+
 ## [v0.2.0](https://github.com/monkescience/vital/compare/v0.1.0...v0.2.0) (2026-03-26)
 
 ### ⚠ BREAKING CHANGES
