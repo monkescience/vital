@@ -373,6 +373,12 @@ func TestCommonProblemConstructors(t *testing.T) {
 			expectedTitle:  "Gone",
 		},
 		{
+			name:           "RequestEntityTooLarge",
+			constructor:    vital.RequestEntityTooLarge,
+			expectedStatus: http.StatusRequestEntityTooLarge,
+			expectedTitle:  "Request Entity Too Large",
+		},
+		{
 			name:           "UnprocessableEntity",
 			constructor:    vital.UnprocessableEntity,
 			expectedStatus: http.StatusUnprocessableEntity,

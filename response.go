@@ -214,6 +214,11 @@ func Gone(detail string, opts ...ProblemOption) *ProblemDetail {
 	return newProblem(http.StatusGone, "Gone", detail, opts...)
 }
 
+// RequestEntityTooLarge creates a 413 Request Entity Too Large problem detail.
+func RequestEntityTooLarge(detail string, opts ...ProblemOption) *ProblemDetail {
+	return newProblem(http.StatusRequestEntityTooLarge, "Request Entity Too Large", detail, opts...)
+}
+
 // UnprocessableEntity creates a 422 Unprocessable Entity problem detail.
 func UnprocessableEntity(detail string, opts ...ProblemOption) *ProblemDetail {
 	return newProblem(http.StatusUnprocessableEntity, "Unprocessable Entity", detail, opts...)
