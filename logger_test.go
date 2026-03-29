@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/monkescience/vital"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestContextHandler(t *testing.T) {
@@ -320,28 +322,192 @@ func TestRegistry(t *testing.T) {
 	})
 }
 
-func TestBuiltinKeys(t *testing.T) {
-	t.Run("includes all trace context keys", func(t *testing.T) {
-		// when: getting builtin keys
-		keys := vital.BuiltinKeys()
+func TestContextHandler_WithBuiltinKeys_OTelSpanContext(t *testing.T) {
+	t.Run("extracts trace context from OTel span", func(t *testing.T) {
+		// given: a context handler with builtin keys and an active OTel span
+		var buf bytes.Buffer
 
-		// then: all trace context keys should be included
-		expectedKeys := map[string]bool{
-			"trace_id":    false,
-			"span_id":     false,
-			"trace_flags": false,
+		baseHandler := slog.NewJSONHandler(&buf, nil)
+		handler := vital.NewContextHandler(baseHandler, vital.WithBuiltinKeys())
+		logger := slog.New(handler)
+
+		spanExporter := tracetest.NewInMemoryExporter()
+		tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(spanExporter))
+		tracer := tp.Tracer("test")
+
+		ctx, span := tracer.Start(context.Background(), "test-span")
+		defer span.End()
+
+		spanCtx := span.SpanContext()
+
+		// when: logging with the span context
+		logger.InfoContext(ctx, "test message")
+
+		// then: trace_id, span_id, and trace_flags should be in the log output
+		var logEntry map[string]any
+
+		err := json.Unmarshal(buf.Bytes(), &logEntry)
+		if err != nil {
+			t.Fatalf("failed to parse log output: %v", err)
 		}
 
-		for _, key := range keys {
-			if _, exists := expectedKeys[key.Name]; exists {
-				expectedKeys[key.Name] = true
-			}
+		if logEntry["trace_id"] != spanCtx.TraceID().String() {
+			t.Errorf("expected trace_id=%s, got %v", spanCtx.TraceID().String(), logEntry["trace_id"])
 		}
 
-		for keyName, found := range expectedKeys {
-			if !found {
-				t.Errorf("expected %s to be in builtin keys", keyName)
-			}
+		if logEntry["span_id"] != spanCtx.SpanID().String() {
+			t.Errorf("expected span_id=%s, got %v", spanCtx.SpanID().String(), logEntry["span_id"])
+		}
+
+		if logEntry["trace_flags"] != spanCtx.TraceFlags().String() {
+			t.Errorf("expected trace_flags=%s, got %v", spanCtx.TraceFlags().String(), logEntry["trace_flags"])
+		}
+	})
+
+	t.Run("omits trace context when no span in context", func(t *testing.T) {
+		// given: a context handler with builtin keys but no active span
+		var buf bytes.Buffer
+
+		baseHandler := slog.NewJSONHandler(&buf, nil)
+		handler := vital.NewContextHandler(baseHandler, vital.WithBuiltinKeys())
+		logger := slog.New(handler)
+
+		// when: logging without a span
+		logger.InfoContext(context.Background(), "test message")
+
+		// then: trace fields should not be present
+		var logEntry map[string]any
+
+		err := json.Unmarshal(buf.Bytes(), &logEntry)
+		if err != nil {
+			t.Fatalf("failed to parse log output: %v", err)
+		}
+
+		if _, exists := logEntry["trace_id"]; exists {
+			t.Error("expected trace_id to not be in log output")
+		}
+
+		if _, exists := logEntry["span_id"]; exists {
+			t.Error("expected span_id to not be in log output")
+		}
+	})
+
+	t.Run("preserves builtin keys through WithAttrs", func(t *testing.T) {
+		// given: a context handler with builtin keys, then WithAttrs applied
+		var buf bytes.Buffer
+
+		baseHandler := slog.NewJSONHandler(&buf, nil)
+		handler := vital.NewContextHandler(baseHandler, vital.WithBuiltinKeys())
+		logger := slog.New(handler)
+		logger = logger.With(slog.String("service", "test"))
+
+		spanExporter := tracetest.NewInMemoryExporter()
+		tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(spanExporter))
+		tracer := tp.Tracer("test")
+
+		ctx, span := tracer.Start(context.Background(), "test-span")
+		defer span.End()
+
+		spanCtx := span.SpanContext()
+
+		// when: logging
+		logger.InfoContext(ctx, "test message")
+
+		// then: trace context should still be extracted
+		var logEntry map[string]any
+
+		err := json.Unmarshal(buf.Bytes(), &logEntry)
+		if err != nil {
+			t.Fatalf("failed to parse log output: %v", err)
+		}
+
+		if logEntry["trace_id"] != spanCtx.TraceID().String() {
+			t.Errorf("expected trace_id=%s, got %v", spanCtx.TraceID().String(), logEntry["trace_id"])
+		}
+
+		if logEntry["service"] != "test" {
+			t.Errorf("expected service=test, got %v", logEntry["service"])
+		}
+	})
+
+	t.Run("preserves builtin keys through WithGroup", func(t *testing.T) {
+		// given: a context handler with builtin keys, then WithGroup applied
+		var buf bytes.Buffer
+
+		baseHandler := slog.NewJSONHandler(&buf, nil)
+		handler := vital.NewContextHandler(baseHandler, vital.WithBuiltinKeys())
+		logger := slog.New(handler)
+		loggerWithGroup := logger.WithGroup("group1")
+
+		spanExporter := tracetest.NewInMemoryExporter()
+		tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(spanExporter))
+		tracer := tp.Tracer("test")
+
+		ctx, span := tracer.Start(context.Background(), "test-span")
+		defer span.End()
+
+		spanCtx := span.SpanContext()
+
+		// when: logging
+		loggerWithGroup.InfoContext(ctx, "test message", slog.String("key", "value"))
+
+		// then: trace context should be extracted within the group (slog groups all Handle attrs)
+		var logEntry map[string]any
+
+		err := json.Unmarshal(buf.Bytes(), &logEntry)
+		if err != nil {
+			t.Fatalf("failed to parse log output: %v", err)
+		}
+
+		group, ok := logEntry["group1"].(map[string]any)
+		if !ok {
+			t.Fatal("expected group1 to be a map")
+		}
+
+		if group["trace_id"] != spanCtx.TraceID().String() {
+			t.Errorf("expected trace_id=%s, got %v", spanCtx.TraceID().String(), group["trace_id"])
+		}
+	})
+
+	t.Run("works alongside custom context keys", func(t *testing.T) {
+		// given: a context handler with both builtin keys and custom keys
+		var buf bytes.Buffer
+
+		baseHandler := slog.NewJSONHandler(&buf, nil)
+		customKey := vital.ContextKey{Name: "request_id"}
+		handler := vital.NewContextHandler(baseHandler,
+			vital.WithBuiltinKeys(),
+			vital.WithContextKeys(customKey),
+		)
+		logger := slog.New(handler)
+
+		spanExporter := tracetest.NewInMemoryExporter()
+		tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(spanExporter))
+		tracer := tp.Tracer("test")
+
+		ctx, span := tracer.Start(context.Background(), "test-span")
+		defer span.End()
+
+		ctx = context.WithValue(ctx, customKey, "req-123")
+		spanCtx := span.SpanContext()
+
+		// when: logging
+		logger.InfoContext(ctx, "test message")
+
+		// then: both OTel trace context and custom keys should be present
+		var logEntry map[string]any
+
+		err := json.Unmarshal(buf.Bytes(), &logEntry)
+		if err != nil {
+			t.Fatalf("failed to parse log output: %v", err)
+		}
+
+		if logEntry["trace_id"] != spanCtx.TraceID().String() {
+			t.Errorf("expected trace_id=%s, got %v", spanCtx.TraceID().String(), logEntry["trace_id"])
+		}
+
+		if logEntry["request_id"] != "req-123" {
+			t.Errorf("expected request_id=req-123, got %v", logEntry["request_id"])
 		}
 	})
 }
@@ -627,43 +793,28 @@ func TestNewHandlerFromConfig(t *testing.T) {
 
 		// when: creating a handler with builtin keys
 		handler, err := vital.NewHandlerFromConfig(cfg, vital.WithBuiltinKeys())
-		// then: it should succeed and include builtin keys
+		// then: it should succeed and have builtin keys enabled
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		contextHandler, ok := handler.(*vital.ContextHandler)
+		_, ok := handler.(*vital.ContextHandler)
 		if !ok {
 			t.Fatal("expected handler to be a ContextHandler")
-		}
-
-		// Verify builtin keys are registered
-		keys := contextHandler.Registry().Keys()
-		expectedKeys := map[string]bool{
-			"trace_id":    false,
-			"span_id":     false,
-			"trace_flags": false,
-		}
-
-		for _, key := range keys {
-			if _, exists := expectedKeys[key.Name]; exists {
-				expectedKeys[key.Name] = true
-			}
-		}
-
-		for keyName, found := range expectedKeys {
-			if !found {
-				t.Errorf("expected builtin key %s to be registered", keyName)
-			}
 		}
 	})
 }
 
 func BenchmarkRegistryKeys(b *testing.B) {
 	registry := vital.NewRegistry()
-	registry.Register(vital.TraceIDKey)
-	registry.Register(vital.SpanIDKey)
-	registry.Register(vital.TraceFlagsKey)
+
+	key1 := vital.ContextKey{Name: "key1"}
+	key2 := vital.ContextKey{Name: "key2"}
+	key3 := vital.ContextKey{Name: "key3"}
+
+	registry.Register(key1)
+	registry.Register(key2)
+	registry.Register(key3)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -680,9 +831,12 @@ func BenchmarkContextHandlerHandle(b *testing.B) {
 	handler := vital.NewContextHandler(baseHandler, vital.WithBuiltinKeys())
 	logger := slog.New(handler)
 
-	ctx := context.WithValue(context.Background(), vital.TraceIDKey, "4bf92f3577b34da6a3ce929d0e0e4736")
-	ctx = context.WithValue(ctx, vital.SpanIDKey, "00f067aa0ba902b7")
-	ctx = context.WithValue(ctx, vital.TraceFlagsKey, "01")
+	spanExporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(spanExporter))
+	tracer := tp.Tracer("bench")
+
+	ctx, span := tracer.Start(context.Background(), "bench-span")
+	defer span.End()
 
 	b.ReportAllocs()
 	b.ResetTimer()

@@ -6,7 +6,7 @@ Production-ready HTTP server utilities for Go with built-in observability, healt
 
 - **Server Management**: Graceful shutdown, TLS support, configurable timeouts
 - **Health Checks**: Liveness, startup, and readiness endpoints with custom checkers
-- **Middleware**: Timeout, tracing, metrics, request logging, recovery, basic auth, body size limit
+- **Middleware**: Timeout, request logging, recovery, basic auth, body size limit
 - **Error Responses**: RFC 9457 ProblemDetail for consistent error handling
 - **Structured Logging**: Context-aware logging with trace correlation
 
@@ -270,42 +270,6 @@ handler := vital.Timeout(30 * time.Second)(mux)
 `vital.Timeout` does not force a timeout response. It sets `r.Context()` deadline;
 handlers and downstream calls should honor cancellation (`ctx.Done()`).
 
-### OpenTelemetry
-
-Add distributed tracing and metrics with separate middleware:
-
-```go
-import (
-	"go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/trace"
-)
-
-// Setup providers
-tp := trace.NewTracerProvider(...)
-mp := metric.NewMeterProvider(...)
-
-tracing := vital.Tracing(
-	vital.WithTracerProvider(tp),
-)
-
-metrics, err := vital.Metrics(
-	vital.WithMeterProvider(mp),
-)
-if err != nil {
-	panic(err)
-}
-
-handler := metrics(tracing(mux))
-```
-
-Tracing features:
-- Creates spans for each HTTP request
-- Propagates inbound W3C traceparent headers
-- Adds `trace_id`, `span_id`, and `trace_flags` to request context
-
-Metrics features:
-- Records `http.server.request.duration` histogram
-
 ### Request Logger
 
 Log all HTTP requests with structured logging:
@@ -319,7 +283,7 @@ Logs include:
 - Status code
 - Request duration
 - Remote address and user agent
-- Trace context (if Tracing middleware is used)
+- Trace context (when an OTel-compliant tracing middleware is used and `WithBuiltinKeys()` is enabled)
 
 Example log output:
 ```json
@@ -382,20 +346,9 @@ A limit of 0 or negative disables the check.
 Chain multiple middleware together (applied right-to-left):
 
 ```go
-metricsMiddleware, err := vital.Metrics(
-	vital.WithMeterProvider(mp),
-)
-if err != nil {
-	panic(err)
-}
-
 handler := vital.Recovery(logger)(
-	vital.Tracing(vital.WithTracerProvider(tp))(
-		metricsMiddleware(
-			vital.RequestLogger(logger)(
-				vital.Timeout(30 * time.Second)(mux),
-			),
-		),
+	vital.RequestLogger(logger)(
+		vital.Timeout(30 * time.Second)(mux),
 	),
 )
 ```
@@ -404,9 +357,7 @@ Recommended order (innermost to outermost):
 1. MaxBytesBody - reject oversized bodies
 2. Timeout - enforce request deadlines
 3. RequestLogger - log requests (with tracing context)
-4. Metrics - record request duration
-5. Tracing - create and propagate spans
-6. Recovery - catch panics
+4. Recovery - catch panics
 
 ### Chi Example
 
@@ -425,15 +376,8 @@ import (
 func newHandler(logger *slog.Logger) http.Handler {
 	router := chi.NewRouter()
 
-	metricsMiddleware, err := vital.Metrics()
-	if err != nil {
-		panic(err)
-	}
-
 	router.Group(func(r chi.Router) {
 		r.Use(vital.Recovery(logger))
-		r.Use(vital.Tracing())
-		r.Use(metricsMiddleware)
 		r.Use(vital.RequestLogger(logger))
 		r.Use(vital.Timeout(30 * time.Second))
 
@@ -522,12 +466,12 @@ Response:
 
 ### Context-Aware Logger
 
-Create a logger that automatically extracts trace context:
+Create a logger that automatically extracts trace context from any OTel-compliant middleware (e.g., `otelhttp`):
 
 ```go
 logger := slog.New(vital.NewContextHandler(
 	slog.NewJSONHandler(os.Stdout, nil),
-	vital.WithBuiltinKeys(), // Adds trace_id, span_id, trace_flags
+	vital.WithBuiltinKeys(), // Extracts trace_id, span_id, trace_flags from OTel span context
 ))
 
 slog.SetDefault(logger)
@@ -722,19 +666,6 @@ func main() {
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `WithOverallReadyTimeout` | `time.Duration` | 2s | Timeout for all checks |
-
-### Tracing Options
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `WithTracerProvider` | `trace.TracerProvider` | `otel.GetTracerProvider()` | Custom tracer provider |
-| `WithPropagator` | `propagation.TextMapPropagator` | `propagation.TraceContext{}` | Custom propagator |
-
-### Metrics Options
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `WithMeterProvider` | `metric.MeterProvider` | `otel.GetMeterProvider()` | Custom meter provider |
 
 ### Logger Options
 

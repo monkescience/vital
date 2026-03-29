@@ -7,27 +7,14 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // ContextKey is a strongly-typed key for storing values in context that should be logged.
 type ContextKey struct {
 	Name string
 }
-
-// TraceIDKey is the context key for W3C trace ID.
-//
-//nolint:gochecknoglobals // Global key is required for middleware integration
-var TraceIDKey = ContextKey{Name: "trace_id"}
-
-// SpanIDKey is the context key for W3C span ID.
-//
-//nolint:gochecknoglobals // Global key is required for middleware integration
-var SpanIDKey = ContextKey{Name: "span_id"}
-
-// TraceFlagsKey is the context key for W3C trace flags.
-//
-//nolint:gochecknoglobals // Global key is required for middleware integration
-var TraceFlagsKey = ContextKey{Name: "trace_flags"}
 
 // Registry manages a collection of context keys to extract and log.
 // Each ContextHandler can have its own Registry for isolation.
@@ -85,21 +72,14 @@ func (r *Registry) Keys() []ContextKey {
 	return keys
 }
 
-// BuiltinKeys returns all built-in context keys provided by the vital library.
-// These are keys used by vital's middleware (e.g., TraceIDKey, SpanIDKey, TraceFlagsKey).
-func BuiltinKeys() []ContextKey {
-	return []ContextKey{
-		TraceIDKey,
-		SpanIDKey,
-		TraceFlagsKey,
-	}
-}
-
 // ContextHandler is a slog.Handler that automatically extracts registered context values
 // and adds them as log attributes.
+// When WithBuiltinKeys is used, it also extracts trace_id, span_id, and trace_flags from
+// the OTel span context stored in the context by any OTel-compliant middleware.
 type ContextHandler struct {
-	handler  slog.Handler
-	registry *Registry
+	handler     slog.Handler
+	registry    *Registry
+	builtinKeys bool
 }
 
 // ContextHandlerOption is a functional option for configuring a ContextHandler.
@@ -113,13 +93,11 @@ func WithRegistry(registry *Registry) ContextHandlerOption {
 	}
 }
 
-// WithBuiltinKeys registers all built-in context keys from the vital library.
-// This includes keys used by vital's middleware (e.g., TraceIDKey, SpanIDKey, TraceFlagsKey).
+// WithBuiltinKeys enables automatic extraction of trace_id, span_id, and trace_flags
+// from the OTel span context. This works with any OTel-compliant middleware (e.g., otelhttp).
 func WithBuiltinKeys() ContextHandlerOption {
 	return func(h *ContextHandler) {
-		for _, key := range BuiltinKeys() {
-			h.registry.Register(key)
-		}
+		h.builtinKeys = true
 	}
 }
 
@@ -172,6 +150,16 @@ func (h *ContextHandler) Enabled(ctx context.Context, level slog.Level) bool {
 
 // Handle processes the log record, extracting registered context values and adding them as attributes.
 func (h *ContextHandler) Handle(ctx context.Context, record slog.Record) error {
+	if h.builtinKeys {
+		if spanCtx := trace.SpanFromContext(ctx).SpanContext(); spanCtx.IsValid() {
+			record.AddAttrs(
+				slog.String("trace_id", spanCtx.TraceID().String()),
+				slog.String("span_id", spanCtx.SpanID().String()),
+				slog.String("trace_flags", spanCtx.TraceFlags().String()),
+			)
+		}
+	}
+
 	// Extract all registered context keys and add them to the log record
 	for _, key := range h.registry.Keys() {
 		if value := ctx.Value(key); value != nil {
@@ -191,21 +179,27 @@ func (h *ContextHandler) Handle(ctx context.Context, record slog.Record) error {
 }
 
 // WithAttrs returns a new handler with the given attributes added.
-// The returned handler preserves the same registry as the original.
+// The returned handler preserves the same registry and builtinKeys setting as the original.
 func (h *ContextHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return NewContextHandler(
+	ch := NewContextHandler(
 		h.handler.WithAttrs(attrs),
 		WithRegistry(h.registry),
 	)
+	ch.builtinKeys = h.builtinKeys
+
+	return ch
 }
 
 // WithGroup returns a new handler with the given group name.
-// The returned handler preserves the same registry as the original.
+// The returned handler preserves the same registry and builtinKeys setting as the original.
 func (h *ContextHandler) WithGroup(name string) slog.Handler {
-	return NewContextHandler(
+	ch := NewContextHandler(
 		h.handler.WithGroup(name),
 		WithRegistry(h.registry),
 	)
+	ch.builtinKeys = h.builtinKeys
+
+	return ch
 }
 
 // Registry returns the handler's registry for inspection.
