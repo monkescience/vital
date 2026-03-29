@@ -1,5 +1,14 @@
 # Changelog
 
+## [v0.4.0](https://github.com/monkescience/vital/compare/v0.3.0...v0.4.0) (2026-03-29)
+
+### ⚠ BREAKING CHANGES
+
+- remove custom OTel middleware, extract trace context from OTel span directly ([0684e85](https://github.com/monkescience/vital/commit/0684e850723a0a46f179b654a59f51c2011b1b2d))
+### Features
+
+- remove custom OTel middleware, extract trace context from OTel span directly ([0684e85](https://github.com/monkescience/vital/commit/0684e850723a0a46f179b654a59f51c2011b1b2d))
+
 ## [v0.3.0](https://github.com/monkescience/vital/compare/v0.2.1...v0.3.0) (2026-03-27)
 
 ### ⚠ BREAKING CHANGES
