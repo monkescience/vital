@@ -76,6 +76,7 @@ func WithShutdownTimeout(timeout time.Duration) ServerOption {
 }
 
 // WithShutdownFunc registers a cleanup hook that runs during shutdown.
+// A nil fn is silently ignored.
 func WithShutdownFunc(fn ShutdownFunc) ServerOption {
 	return func(s *Server) {
 		if fn == nil {
@@ -123,6 +124,7 @@ func WithIdleTimeout(timeout time.Duration) ServerOption {
 }
 
 // WithLogger sets the structured logger for the server.
+// A nil logger is silently ignored; the default slog.Default() is kept.
 func WithLogger(logger *slog.Logger) ServerOption {
 	return func(s *Server) {
 		if logger == nil {
