@@ -45,6 +45,7 @@ type Server struct {
 	shutdownFuncs        []ShutdownFunc
 	shutdownHooksTimeout time.Duration
 	shutdownOnce         sync.Once
+	shutdownErr          error
 	logger               *slog.Logger
 }
 
@@ -291,9 +292,9 @@ func (server *Server) runShutdownFuncsWithTimeout(ctx context.Context) error {
 }
 
 func (server *Server) runShutdownFuncs(ctx context.Context) error {
-	var runErr error
-
 	server.shutdownOnce.Do(func() {
+		var runErr error
+
 		for idx := len(server.shutdownFuncs) - 1; idx >= 0; idx-- {
 			shutdownFunc := server.shutdownFuncs[idx]
 
@@ -311,9 +312,11 @@ func (server *Server) runShutdownFuncs(ctx context.Context) error {
 				}
 			}(idx)
 		}
+
+		server.shutdownErr = runErr
 	})
 
-	return runErr
+	return server.shutdownErr
 }
 
 func wrapIfError(err error, message string) error {

@@ -404,6 +404,52 @@ func TestServer_Stop(t *testing.T) {
 		}
 	})
 
+	t.Run("repeat stop calls replay hook errors", func(t *testing.T) {
+		// given: a running server whose shutdown hook returns an error
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+
+		port := getAvailablePort(t)
+		hookErr := errors.New("hook failed")
+
+		var calls atomic.Int32
+
+		server := vital.NewServer(
+			handler,
+			vital.WithPort(port),
+			vital.WithShutdownFunc(func(ctx context.Context) error {
+				calls.Add(1)
+
+				return hookErr
+			}),
+			vital.WithLogger(slog.New(slog.DiscardHandler)),
+		)
+
+		go func() {
+			_ = server.Start()
+		}()
+
+		waitForServer(t, fmt.Sprintf("http://localhost:%d", port))
+
+		// when: stopping the server twice
+		firstErr := server.Stop()
+		secondErr := server.Stop()
+
+		// then: both calls should return the original hook error, and the hook should run only once
+		if !errors.Is(firstErr, hookErr) {
+			t.Fatalf("expected first Stop to return hook error, got %v", firstErr)
+		}
+
+		if !errors.Is(secondErr, hookErr) {
+			t.Fatalf("expected second Stop to replay hook error, got %v", secondErr)
+		}
+
+		if calls.Load() != 1 {
+			t.Errorf("expected shutdown hook to run exactly once, got %d", calls.Load())
+		}
+	})
+
 	t.Run("runs hooks with a fresh timeout budget", func(t *testing.T) {
 		// given: a slow in-flight request and a longer hook timeout
 		requestStarted := make(chan struct{})
