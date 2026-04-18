@@ -58,28 +58,26 @@ func (rw *responseWriter) Unwrap() http.ResponseWriter {
 	return rw.ResponseWriter
 }
 
-func (rw *responseWriter) Flush() {
-	flusher, ok := rw.ResponseWriter.(http.Flusher)
-	if !ok {
-		return
-	}
-
+// FlushError writes a default status header if none was written, then delegates
+// to http.ResponseController.Flush so the Unwrap chain is walked. Returns
+// http.ErrNotSupported when nothing in the chain can flush.
+func (rw *responseWriter) FlushError() error {
 	if !rw.wroteHeader {
 		rw.WriteHeader(http.StatusOK)
 	}
 
-	flusher.Flush()
+	//nolint:wrapcheck // Delegating to underlying ResponseWriter, wrapping would lose context.
+	return http.NewResponseController(rw.ResponseWriter).Flush()
+}
+
+func (rw *responseWriter) Flush() {
+	_ = rw.FlushError()
 }
 
 func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	hijacker, ok := rw.ResponseWriter.(http.Hijacker)
-	if !ok {
-		return nil, nil, http.ErrNotSupported
-	}
-
-	conn, brw, err := hijacker.Hijack()
+	conn, brw, err := http.NewResponseController(rw.ResponseWriter).Hijack()
 	if err != nil {
-		//nolint:wrapcheck // Delegating to underlying ResponseWriter, wrapping would lose context
+		//nolint:wrapcheck // Delegating to underlying ResponseWriter, wrapping would lose context.
 		return nil, nil, err
 	}
 
