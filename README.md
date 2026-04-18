@@ -1,14 +1,14 @@
 # Vital
 
-Production-ready HTTP server utilities for Go with built-in observability, health checks, and middleware.
+HTTP server utilities for Go: graceful shutdown, health checks, RFC 9457
+problem-detail responses, and a context-aware `slog` handler.
 
 ## Features
 
 - **Server Management**: Graceful shutdown, TLS support, configurable timeouts
 - **Health Checks**: Liveness, startup, and readiness endpoints with custom checkers
-- **Middleware**: Timeout, request logging, recovery, basic auth, body size limit
 - **Error Responses**: RFC 9457 ProblemDetail for consistent error handling
-- **Structured Logging**: Context-aware logging with trace correlation
+- **Structured Logging**: Context-aware `slog` handler with trace correlation
 
 ## Installation
 
@@ -25,50 +25,37 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/monkescience/vital"
 )
 
 func main() {
-	// Create logger with context support
 	logger := slog.New(vital.NewContextHandler(
 		slog.NewJSONHandler(os.Stdout, nil),
 		vital.WithBuiltinKeys(),
 	))
 	slog.SetDefault(logger)
 
-	// Create router
 	mux := http.NewServeMux()
 
-	// Add health checks
 	mux.Handle("/", vital.NewHealthHandler(
 		vital.WithVersion("1.0.0"),
 		vital.WithEnvironment("production"),
 	))
 
-	// Add your routes
 	mux.HandleFunc("GET /api/hello", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Hello, World!"))
+		_, _ = w.Write([]byte("Hello, World!"))
 	})
 
-	// Wrap with middleware
-	handler := vital.Recovery(logger)(
-		vital.RequestLogger(logger)(
-			vital.Timeout(30 * time.Second)(mux),
-		),
+	server := vital.NewServer(mux,
+		vital.WithPort(8080),
+		vital.WithLogger(logger),
 	)
 
-// Create and run server
-server := vital.NewServer(handler,
-	vital.WithPort(8080),
-	vital.WithLogger(logger),
-)
-
-if err := server.Run(); err != nil {
-	logger.Error("server stopped", slog.Any("error", err))
-	os.Exit(1)
-}
+	if err := server.Run(); err != nil {
+		logger.Error("server stopped", slog.Any("error", err))
+		os.Exit(1)
+	}
 }
 ```
 
@@ -259,141 +246,7 @@ Readiness response:
 
 ## Middleware
 
-### Timeout
-
-Enforce a request timeout:
-
-```go
-handler := vital.Timeout(30 * time.Second)(mux)
-```
-
-`vital.Timeout` sets a deadline on `r.Context()` and, if the handler has not
-returned by the deadline, writes a 503 Service Unavailable problem detail and
-discards any subsequent writes from the handler. It wraps
-[`http.TimeoutHandler`](https://pkg.go.dev/net/http#TimeoutHandler), so it does
-not support `http.Hijacker` or `http.Flusher` — do not apply it to WebSocket,
-SSE, or other streaming endpoints.
-
-### Request Logger
-
-Log all HTTP requests with structured logging:
-
-```go
-handler := vital.RequestLogger(logger)(mux)
-```
-
-Logs include:
-- HTTP method and path
-- Status code
-- Request duration
-- Remote address and user agent
-- Trace context (when an OTel-compliant tracing middleware is used and `WithBuiltinKeys()` is enabled)
-
-Example log output:
-```json
-{
-  "time": "2025-01-26T10:30:00Z",
-  "level": "INFO",
-  "msg": "http request",
-  "method": "GET",
-  "path": "/api/users",
-  "status": 200,
-  "duration": "15ms",
-  "remote_addr": "192.168.1.1:54321",
-  "user_agent": "curl/7.68.0",
-  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
-  "span_id": "00f067aa0ba902b7"
-}
-```
-
-### Recovery
-
-Recover from panics and return 500 error:
-
-```go
-handler := vital.Recovery(logger)(mux)
-```
-
-Catches panics, logs the error, and returns:
-```json
-{
-  "status": 500,
-  "title": "Internal Server Error",
-  "detail": "internal server error"
-}
-```
-
-### Basic Auth
-
-Protect endpoints with HTTP Basic Authentication:
-
-```go
-handler := vital.BasicAuth("admin", "secret", "Admin Area")(mux)
-```
-
-Uses constant-time comparison to prevent timing attacks.
-
-### Body Size Limit
-
-Limit request body size to prevent oversized payloads:
-
-```go
-handler := vital.MaxBytesBody(1 << 20)(mux) // 1 MB limit
-```
-
-If `Content-Length` exceeds the limit, responds immediately with `413 Request Entity Too Large`.
-For chunked requests, wraps the body with `http.MaxBytesReader`.
-A limit of 0 or negative disables the check.
-
-### Middleware Chaining
-
-Chain multiple middleware together (applied right-to-left):
-
-```go
-handler := vital.Recovery(logger)(
-	vital.RequestLogger(logger)(
-		vital.Timeout(30 * time.Second)(mux),
-	),
-)
-```
-
-Recommended order (innermost to outermost):
-1. MaxBytesBody - reject oversized bodies
-2. Timeout - enforce request deadlines
-3. RequestLogger - log requests (with tracing context)
-4. Recovery - catch panics
-
-### Chi Example
-
-Yes, middleware groups are a great fit with `chi`:
-
-```go
-import (
-	"log/slog"
-	"net/http"
-	"time"
-
-	"github.com/go-chi/chi/v5"
-	"github.com/monkescience/vital"
-)
-
-func newHandler(logger *slog.Logger) http.Handler {
-	router := chi.NewRouter()
-
-	router.Group(func(r chi.Router) {
-		r.Use(vital.Recovery(logger))
-		r.Use(vital.RequestLogger(logger))
-		r.Use(vital.Timeout(30 * time.Second))
-
-		r.Get("/hello", func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("hello"))
-		})
-	})
-
-	return router
-}
-```
+Vital does not ship HTTP middleware — use [`chi/middleware`](https://pkg.go.dev/github.com/go-chi/chi/v5/middleware) or the standard library.
 
 ## Error Responses
 
@@ -532,7 +385,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/monkescience/vital"
 	_ "github.com/lib/pq"
@@ -606,15 +458,8 @@ func main() {
 		w.WriteHeader(http.StatusCreated)
 	})
 
-	// Apply middleware
-	handler := vital.Recovery(logger)(
-		vital.RequestLogger(logger)(
-			vital.Timeout(30 * time.Second)(mux),
-		),
-	)
-
 	// Create and run server
-	server := vital.NewServer(handler,
+	server := vital.NewServer(mux,
 		vital.WithPort(8080),
 		vital.WithLogger(logger),
 	)
