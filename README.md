@@ -261,14 +261,18 @@ Readiness response:
 
 ### Timeout
 
-Apply a cooperative request timeout via context deadline:
+Enforce a request timeout:
 
 ```go
 handler := vital.Timeout(30 * time.Second)(mux)
 ```
 
-`vital.Timeout` does not force a timeout response. It sets `r.Context()` deadline;
-handlers and downstream calls should honor cancellation (`ctx.Done()`).
+`vital.Timeout` sets a deadline on `r.Context()` and, if the handler has not
+returned by the deadline, writes a 503 Service Unavailable problem detail and
+discards any subsequent writes from the handler. It wraps
+[`http.TimeoutHandler`](https://pkg.go.dev/net/http#TimeoutHandler), so it does
+not support `http.Hijacker` or `http.Flusher` — do not apply it to WebSocket,
+SSE, or other streaming endpoints.
 
 ### Request Logger
 

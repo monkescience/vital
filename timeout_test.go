@@ -87,7 +87,11 @@ func TestTimeout(t *testing.T) {
 		// given: a handler that waits for context cancellation
 		var contextCancelled atomic.Bool
 
+		handlerDone := make(chan struct{})
+
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer close(handlerDone)
+
 			select {
 			case <-time.After(200 * time.Millisecond):
 				t.Error("expected context cancellation before handler delay completed")
@@ -106,20 +110,27 @@ func TestTimeout(t *testing.T) {
 		// when: the timeout expires before handler work completes
 		timeoutHandler.ServeHTTP(rec, req)
 
-		// then: handler should observe cancellation via request context
+		// wait for the handler goroutine to react to cancellation
+		select {
+		case <-handlerDone:
+		case <-time.After(time.Second):
+			t.Fatal("handler goroutine did not finish after timeout")
+		}
+
+		// then: handler should observe cancellation and the middleware should enforce 503
 		if !contextCancelled.Load() {
 			t.Error("expected context to be cancelled in handler")
 		}
 
-		if rec.Code != http.StatusOK {
-			t.Errorf("expected status %d when handler writes no response, got %d", http.StatusOK, rec.Code)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, rec.Code)
 		}
 	})
 
-	t.Run("does not force timeout response", func(t *testing.T) {
+	t.Run("forces timeout response when handler ignores cancellation", func(t *testing.T) {
 		// given: a handler that ignores context cancellation and writes late
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			time.Sleep(25 * time.Millisecond)
+			time.Sleep(50 * time.Millisecond)
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("success"))
 		})
@@ -132,13 +143,17 @@ func TestTimeout(t *testing.T) {
 		// when: request processing exceeds timeout
 		timeoutHandler.ServeHTTP(rec, req)
 
-		// then: middleware remains cooperative and does not overwrite response
-		if rec.Code != http.StatusOK {
-			t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
+		// then: middleware should write a 503 problem detail body and discard the handler's late write
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, rec.Code)
 		}
 
-		if rec.Body.String() != "success" {
-			t.Errorf("expected body success, got %q", rec.Body.String())
+		if !strings.Contains(rec.Body.String(), `"status":503`) {
+			t.Errorf("expected problem detail body, got %q", rec.Body.String())
+		}
+
+		if strings.Contains(rec.Body.String(), "success") {
+			t.Errorf("expected late handler write to be discarded, got %q", rec.Body.String())
 		}
 	})
 
@@ -216,7 +231,11 @@ func TestTimeout(t *testing.T) {
 			contextCancelled atomic.Bool
 		)
 
+		handlerDone := make(chan struct{})
+
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer close(handlerDone)
+
 			handlerCalled.Store(true)
 
 			select {
@@ -243,6 +262,13 @@ func TestTimeout(t *testing.T) {
 		}()
 
 		timeoutHandler.ServeHTTP(rec, req)
+
+		// wait for handler goroutine to react to cancellation
+		select {
+		case <-handlerDone:
+		case <-time.After(time.Second):
+			t.Fatal("handler goroutine did not finish after cancellation")
+		}
 
 		// then: cancellation should propagate to handler
 		if !handlerCalled.Load() {
