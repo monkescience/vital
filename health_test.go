@@ -162,6 +162,28 @@ func TestLiveHandler(t *testing.T) {
 			t.Errorf("expected status %v, got %v", vital.StatusOK, response.Status)
 		}
 	})
+
+	t.Run("accepts HEAD requests on GET endpoints", func(t *testing.T) {
+		// given: the full health handler
+		handlers := vital.NewHealthHandler(vital.WithVersion("1.2.3"))
+
+		endpoints := []string{"/health/live", "/health/started", "/health/ready"}
+
+		for _, path := range endpoints {
+			t.Run(path, func(t *testing.T) {
+				rec := httptest.NewRecorder()
+				req := httptest.NewRequestWithContext(context.Background(), http.MethodHead, path, nil)
+
+				// when: probing the endpoint with HEAD
+				handlers.ServeHTTP(rec, req)
+
+				// then: HEAD should return 200 (stdlib ServeMux routes HEAD to the GET handler)
+				if rec.Code != http.StatusOK {
+					t.Errorf("HEAD %s: expected status %d, got %d", path, http.StatusOK, rec.Code)
+				}
+			})
+		}
+	})
 }
 
 func TestStartedHandler(t *testing.T) {

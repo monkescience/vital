@@ -158,6 +158,57 @@ func TestMaxBytesBody(t *testing.T) {
 		}
 	})
 
+	t.Run("signals Connection: close when MaxBytesReader limit is exceeded", func(t *testing.T) {
+		// given: a server with a chunked body handler behind MaxBytesBody(10)
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, err := io.ReadAll(r.Body)
+			if err != nil {
+				var maxBytesErr *http.MaxBytesError
+				if errors.As(err, &maxBytesErr) {
+					vital.RespondProblem(r.Context(), w, vital.RequestEntityTooLarge("body too large"))
+
+					return
+				}
+
+				w.WriteHeader(http.StatusInternalServerError)
+
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+		})
+
+		server := httptest.NewServer(vital.MaxBytesBody(10)(handler))
+		defer server.Close()
+
+		// when: sending a chunked request whose body exceeds the limit
+		body := io.NopCloser(strings.NewReader(strings.Repeat("x", 100)))
+
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, server.URL, body)
+		if err != nil {
+			t.Fatalf("failed to create request: %v", err)
+		}
+
+		req.ContentLength = -1 // force chunked encoding
+
+		resp, err := server.Client().Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+
+		defer func() { _ = resp.Body.Close() }()
+
+		// then: the response should use Connection: close (net/http sets this when
+		// MaxBytesReader signals the limit)
+		if resp.StatusCode != http.StatusRequestEntityTooLarge {
+			t.Errorf("expected status %d, got %d", http.StatusRequestEntityTooLarge, resp.StatusCode)
+		}
+
+		if !resp.Close {
+			t.Errorf("expected response.Close=true (Connection: close) when MaxBytesReader signals limit")
+		}
+	})
+
 	t.Run("allows request with no body", func(t *testing.T) {
 		// given: a handler behind MaxBytesBody
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
