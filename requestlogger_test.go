@@ -1,9 +1,11 @@
 package vital_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -56,6 +58,54 @@ func TestRequestLogger(t *testing.T) {
 		}
 	})
 
+	t.Run("logs hijacked connections", func(t *testing.T) {
+		// given: a handler that hijacks the connection
+		var buf bytes.Buffer
+
+		logger := slog.New(slog.NewJSONHandler(&buf, nil))
+
+		serverConn, clientConn := net.Pipe()
+
+		defer func() { _ = serverConn.Close() }()
+		defer func() { _ = clientConn.Close() }()
+
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				t.Fatal("expected response writer to implement http.Hijacker")
+			}
+
+			conn, _, err := hijacker.Hijack()
+			if err != nil {
+				t.Fatalf("expected hijack to succeed, got: %v", err)
+			}
+
+			_ = conn.Close()
+		})
+
+		loggedHandler := vital.RequestLogger(logger)(handler)
+
+		rec := &hijackableRecorder{
+			ResponseRecorder: httptest.NewRecorder(),
+			conn:             serverConn,
+		}
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/ws", nil)
+
+		// when: handling the hijacked request
+		loggedHandler.ServeHTTP(rec, req)
+
+		// then: the log should note the hijack and not claim a 200 status
+		logOutput := buf.String()
+
+		if !strings.Contains(logOutput, `"hijacked":true`) {
+			t.Errorf("expected log to contain 'hijacked:true', got: %s", logOutput)
+		}
+
+		if strings.Contains(logOutput, `"status":200`) {
+			t.Errorf("did not expect status:200 on hijacked connection, got: %s", logOutput)
+		}
+	})
+
 	t.Run("captures status code", func(t *testing.T) {
 		var buf bytes.Buffer
 
@@ -101,4 +151,15 @@ func TestRequestLogger(t *testing.T) {
 			})
 		}
 	})
+}
+
+type hijackableRecorder struct {
+	*httptest.ResponseRecorder
+	conn net.Conn
+}
+
+func (h *hijackableRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return h.conn, bufio.NewReadWriter(
+		bufio.NewReader(h.conn), bufio.NewWriter(h.conn),
+	), nil
 }
