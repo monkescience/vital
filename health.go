@@ -2,6 +2,7 @@ package vital
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -361,8 +362,15 @@ func respondJSON(
 	statusCode int,
 	payload any,
 ) {
-	err := writeJSONResponse(writer, "application/json", statusCode, payload)
+	body, err := json.Marshal(payload)
 	if err == nil {
+		body = append(body, '\n')
+
+		writeErr := writeJSONBytes(writer, "application/json", statusCode, body)
+		if writeErr != nil {
+			slog.ErrorContext(ctx, "failed to write JSON response", slog.Any("error", writeErr))
+		}
+
 		return
 	}
 

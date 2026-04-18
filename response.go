@@ -152,8 +152,15 @@ func (p ProblemDetail) MarshalJSON() ([]byte, error) {
 // RespondProblem writes a ProblemDetail as an HTTP response.
 // It sets the appropriate content type and status code.
 func RespondProblem(ctx context.Context, w http.ResponseWriter, problem *ProblemDetail) {
-	err := writeJSONResponse(w, "application/problem+json", problem.Status, problem)
+	body, err := json.Marshal(problem)
 	if err == nil {
+		body = append(body, '\n')
+
+		writeErr := writeJSONBytes(w, "application/problem+json", problem.Status, body)
+		if writeErr != nil {
+			slog.ErrorContext(ctx, "failed to write problem detail response", slog.Any("error", writeErr))
+		}
+
 		return
 	}
 
@@ -237,17 +244,6 @@ func InternalServerError(detail string, opts ...ProblemOption) *ProblemDetail {
 // ServiceUnavailable creates a 503 Service Unavailable problem detail.
 func ServiceUnavailable(detail string, opts ...ProblemOption) *ProblemDetail {
 	return newProblem(http.StatusServiceUnavailable, "Service Unavailable", detail, opts...)
-}
-
-func writeJSONResponse(w http.ResponseWriter, contentType string, statusCode int, payload any) error {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal json response: %w", err)
-	}
-
-	body = append(body, '\n')
-
-	return writeJSONBytes(w, contentType, statusCode, body)
 }
 
 func writeJSONBytes(w http.ResponseWriter, contentType string, statusCode int, body []byte) error {
