@@ -31,7 +31,7 @@ jobs:
           owner: ${{ github.repository_owner }}
 
       - name: Run yeet
-        uses: docker://ghcr.io/monkescience/yeet:v0.4.6@sha256:c60fbdf1a834661f1358a5af2b5ff509a1d434afb31815899613341abc0ebb6b
+        uses: docker://ghcr.io/monkescience/yeet:v0.4.9@sha256:420cade6620d7b913d52830ceedd39e436e3637339fe3054d74a1daa2d4a87f7
         with:
           args: release
         env:
