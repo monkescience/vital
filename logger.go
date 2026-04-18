@@ -221,11 +221,11 @@ var (
 // LogConfig holds configuration for the logger.
 type LogConfig struct {
 	// Level is the log level (debug, info, warn, error).
-	Level string `json:"level" yaml:"level"`
+	Level string
 	// Format is the log format (json, text).
-	Format string `json:"format" yaml:"format"`
+	Format string
 	// AddSource includes the source file and line number in the log.
-	AddSource bool `json:"add_source" yaml:"add_source"`
+	AddSource bool
 }
 
 // NewHandlerFromConfig creates a new slog.Handler based on the provided configuration.
