@@ -41,13 +41,14 @@ func (r *Registry) Register(key ContextKey) {
 	r.cached = nil
 }
 
-// Keys returns all registered keys as a slice for iteration.
-// The result is cached and invalidated when new keys are registered.
+// Keys returns a copy of all registered keys for safe iteration.
+// The internal cache is invalidated when new keys are registered; callers
+// may freely mutate the returned slice without affecting future calls.
 func (r *Registry) Keys() []ContextKey {
 	r.mutex.RLock()
 
 	if r.cached != nil {
-		keys := r.cached
+		keys := append([]ContextKey(nil), r.cached...)
 		r.mutex.RUnlock()
 
 		return keys
@@ -58,18 +59,16 @@ func (r *Registry) Keys() []ContextKey {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	if r.cached != nil {
-		return r.cached
+	if r.cached == nil {
+		cached := make([]ContextKey, 0, len(r.keys))
+		for key := range r.keys {
+			cached = append(cached, key)
+		}
+
+		r.cached = cached
 	}
 
-	keys := make([]ContextKey, 0, len(r.keys))
-	for key := range r.keys {
-		keys = append(keys, key)
-	}
-
-	r.cached = keys
-
-	return keys
+	return append([]ContextKey(nil), r.cached...)
 }
 
 // ContextHandler is a slog.Handler that automatically extracts registered context values

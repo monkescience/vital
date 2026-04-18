@@ -293,6 +293,30 @@ func TestRegistry(t *testing.T) {
 		}
 	})
 
+	t.Run("returns copy so callers cannot mutate the cache", func(t *testing.T) {
+		// given: a registry with one key
+		registry := vital.NewRegistry()
+		registry.Register(vital.ContextKey{Name: "original"})
+
+		// when: the caller mutates the returned slice
+		keys := registry.Keys()
+		if len(keys) != 1 {
+			t.Fatalf("expected 1 key, got %d", len(keys))
+		}
+
+		keys[0] = vital.ContextKey{Name: "tampered"}
+
+		// then: the registry's internal cache should be unaffected
+		fresh := registry.Keys()
+		if len(fresh) != 1 {
+			t.Fatalf("expected 1 key after tamper, got %d", len(fresh))
+		}
+
+		if fresh[0].Name != "original" {
+			t.Errorf("expected internal cache untouched, got %q", fresh[0].Name)
+		}
+	})
+
 	t.Run("returns all registered keys", func(t *testing.T) {
 		// given: a registry with multiple keys
 		registry := vital.NewRegistry()
