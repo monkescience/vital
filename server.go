@@ -182,12 +182,7 @@ func (server *Server) Run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	err := server.RunContext(ctx)
-	if err == nil && ctx.Err() != nil {
-		server.logger.Info("received shutdown signal")
-	}
-
-	return err
+	return server.RunContext(ctx)
 }
 
 // RunContext starts the server and blocks until the context is canceled or the server fails.
@@ -214,6 +209,8 @@ func (server *Server) RunContext(ctx context.Context) error {
 		)
 
 	case <-ctx.Done():
+		server.logger.Info("received shutdown signal")
+
 		err := server.StopContext(ctx)
 		if err == nil {
 			server.logger.Info("server stopped gracefully")
