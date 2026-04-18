@@ -1,4 +1,4 @@
-# golangci-lint v2.7.2 (2025-12-14)
+# golangci-lint v2.11.4 (2026-03-22)
 version: "2"
 
 run:
@@ -11,14 +11,13 @@ linters:
         rules:
           json: snake
           yaml: snake
-          xml: snake
-          bson: snake
 
   exclusions:
     rules:
       # Disable strict linters in test files
       - path: _test\.go
         linters:
+          - errcheck
           - funlen
           - dupl
           - goconst
@@ -27,6 +26,10 @@ linters:
           - err113
           - gocognit
           - gosec
+      # Generated code is not our responsibility — exclude all linters
+      - path: \.gen\.go
+        linters:
+          - all
 
   default: none
   enable:
