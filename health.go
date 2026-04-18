@@ -202,14 +202,12 @@ func readyHandler(
 	version, environment string,
 	checkers []Checker,
 ) {
-	ctx := req.Context()
-
-	ctx, cancel := contextWithTimeoutIfNeeded(ctx, cfg.overallTimeout)
+	checkCtx, cancel := contextWithTimeoutIfNeeded(req.Context(), cfg.overallTimeout)
 	if cancel != nil {
 		defer cancel()
 	}
 
-	checks := runAllChecks(ctx, checkers)
+	checks := runAllChecks(checkCtx, checkers)
 
 	response := ReadyResponse{
 		Status:      StatusOK,
@@ -226,7 +224,7 @@ func readyHandler(
 	}
 
 	disableResponseCacheHeaders(writer)
-	respondJSON(ctx, writer, statusCode, response)
+	respondJSON(req.Context(), writer, statusCode, response)
 }
 
 func contextWithTimeoutIfNeeded(
