@@ -92,7 +92,11 @@ func (n *nonCooperativeChecker) Check(_ context.Context) (vital.Status, string) 
 }
 
 func TestLiveHandler(t *testing.T) {
+	t.Parallel()
+
 	t.Run("returns OK", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a health handler with version and environment
 		version := "1.2.3"
 		environment := "eu-central-1-dev"
@@ -134,6 +138,8 @@ func TestLiveHandler(t *testing.T) {
 	})
 
 	t.Run("direct handler func", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a live handler function
 		handler := vital.LiveHandlerFunc()
 		responseRecorder := httptest.NewRecorder()
@@ -164,6 +170,8 @@ func TestLiveHandler(t *testing.T) {
 	})
 
 	t.Run("accepts HEAD requests on GET endpoints", func(t *testing.T) {
+		t.Parallel()
+
 		// given: the full health handler
 		handlers := vital.NewHealthHandler(vital.WithVersion("1.2.3"))
 
@@ -171,6 +179,8 @@ func TestLiveHandler(t *testing.T) {
 
 		for _, path := range endpoints {
 			t.Run(path, func(t *testing.T) {
+				t.Parallel()
+
 				rec := httptest.NewRecorder()
 				req := httptest.NewRequestWithContext(context.Background(), http.MethodHead, path, nil)
 
@@ -187,7 +197,11 @@ func TestLiveHandler(t *testing.T) {
 }
 
 func TestStartedHandler(t *testing.T) {
+	t.Parallel()
+
 	t.Run("defaults to OK", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a health handler without a custom started function
 		handlers := vital.NewHealthHandler(
 			vital.WithVersion("1.2.3"),
@@ -225,6 +239,8 @@ func TestStartedHandler(t *testing.T) {
 	})
 
 	t.Run("returns service unavailable until started", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a health handler with a started function that reports false
 		handlers := vital.NewHealthHandler(
 			vital.WithStartedFunc(func() bool {
@@ -259,6 +275,8 @@ func TestStartedHandler(t *testing.T) {
 	})
 
 	t.Run("direct handler func", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a started handler function that reports ready
 		handler := vital.StartedHandlerFunc(func() bool {
 			return true
@@ -292,7 +310,11 @@ func TestStartedHandler(t *testing.T) {
 }
 
 func TestReadyHandler(t *testing.T) {
+	t.Parallel()
+
 	t.Run("no checkers", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a health handler with no checkers
 		version := "1.2.3"
 		environment := "eu-central-1-dev"
@@ -341,6 +363,8 @@ func TestReadyHandler(t *testing.T) {
 	})
 
 	t.Run("successful checker", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a health handler with a successful checker
 		checker := &mockChecker{
 			name:    "database",
@@ -402,6 +426,8 @@ func TestReadyHandler(t *testing.T) {
 	})
 
 	t.Run("failed checker", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a health handler with a failed checker
 		checker := &mockChecker{
 			name:    "redis",
@@ -454,6 +480,8 @@ func TestReadyHandler(t *testing.T) {
 	})
 
 	t.Run("panicking checker", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a health handler with a checker that panics
 		checker := &panicChecker{name: "cache"}
 
@@ -506,6 +534,8 @@ func TestReadyHandler(t *testing.T) {
 	})
 
 	t.Run("multiple checkers", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a health handler with multiple successful checkers
 		checkers := []vital.Checker{
 			&mockChecker{name: "database", status: vital.StatusOK, message: "ok"},
@@ -549,6 +579,8 @@ func TestReadyHandler(t *testing.T) {
 	})
 
 	t.Run("mixed checker results", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a health handler with mixed checker results
 		checkers := []vital.Checker{
 			&mockChecker{name: "database", status: vital.StatusOK, message: "ok"},
@@ -600,6 +632,8 @@ func TestReadyHandler(t *testing.T) {
 	})
 
 	t.Run("timeout", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a slow checker and a short timeout
 		slowChecker := &mockChecker{
 			name:   "slow-service",
@@ -658,6 +692,8 @@ func TestReadyHandler(t *testing.T) {
 	})
 
 	t.Run("non-cooperative checker does not block timeout response", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a checker that ignores context cancellation and blocks
 		blockingChecker := &nonCooperativeChecker{
 			name:  "blocking-service",
@@ -718,6 +754,8 @@ func TestReadyHandler(t *testing.T) {
 	})
 
 	t.Run("zero timeout", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a checker with delay and zero timeout (no timeout applied)
 		checker := &mockChecker{
 			name:   "service",
@@ -758,6 +796,8 @@ func TestReadyHandler(t *testing.T) {
 	})
 
 	t.Run("context cancellation", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a context that gets cancelled immediately
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
@@ -795,6 +835,8 @@ func TestReadyHandler(t *testing.T) {
 	})
 
 	t.Run("direct handler func", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a ready handler function with a checker
 		checker := &mockChecker{
 			name:    "test-service",

@@ -14,7 +14,10 @@ import (
 )
 
 func TestContextHandler(t *testing.T) {
+	t.Parallel()
 	t.Run("extracts context values", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a context handler with a registered context key
 		var buf bytes.Buffer
 
@@ -49,6 +52,8 @@ func TestContextHandler(t *testing.T) {
 	})
 
 	t.Run("handles multiple context keys", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a context handler with multiple registered context keys
 		var buf bytes.Buffer
 
@@ -84,6 +89,8 @@ func TestContextHandler(t *testing.T) {
 	})
 
 	t.Run("omits missing context value", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a context handler with a registered key but no value in context
 		var buf bytes.Buffer
 
@@ -110,6 +117,8 @@ func TestContextHandler(t *testing.T) {
 	})
 
 	t.Run("includes added attributes", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a context handler with added attributes
 		var buf bytes.Buffer
 
@@ -136,6 +145,8 @@ func TestContextHandler(t *testing.T) {
 	})
 
 	t.Run("creates groups", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a context handler with a group
 		var buf bytes.Buffer
 
@@ -167,6 +178,8 @@ func TestContextHandler(t *testing.T) {
 	})
 
 	t.Run("avoids nesting when wrapping context handler", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a context handler wrapping another context handler
 		baseHandler := slog.NewJSONHandler(&bytes.Buffer{}, nil)
 		handler1 := vital.NewContextHandler(baseHandler)
@@ -181,6 +194,8 @@ func TestContextHandler(t *testing.T) {
 	})
 
 	t.Run("respects log level", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a context handler with Warn level
 		baseHandler := slog.NewJSONHandler(&bytes.Buffer{}, &slog.HandlerOptions{
 			Level: slog.LevelWarn,
@@ -206,6 +221,8 @@ func TestContextHandler(t *testing.T) {
 	})
 
 	t.Run("handles different value types", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a context handler with keys for different value types
 		var buf bytes.Buffer
 
@@ -244,7 +261,10 @@ func TestContextHandler(t *testing.T) {
 }
 
 func TestRegistry(t *testing.T) {
+	t.Parallel()
 	t.Run("registers keys", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a new registry
 		registry := vital.NewRegistry()
 
@@ -271,6 +291,8 @@ func TestRegistry(t *testing.T) {
 	})
 
 	t.Run("reflects keys registered after first access", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a registry with one key already accessed
 		registry := vital.NewRegistry()
 
@@ -294,6 +316,8 @@ func TestRegistry(t *testing.T) {
 	})
 
 	t.Run("returns copy so callers cannot mutate the cache", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a registry with one key
 		registry := vital.NewRegistry()
 		registry.Register(vital.ContextKey{Name: "original"})
@@ -318,6 +342,8 @@ func TestRegistry(t *testing.T) {
 	})
 
 	t.Run("returns all registered keys", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a registry with multiple keys
 		registry := vital.NewRegistry()
 
@@ -347,7 +373,10 @@ func TestRegistry(t *testing.T) {
 }
 
 func TestContextHandler_WithBuiltinKeys_OTelSpanContext(t *testing.T) {
+	t.Parallel()
 	t.Run("extracts trace context from OTel span", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a context handler with builtin keys and an active OTel span
 		var buf bytes.Buffer
 
@@ -389,6 +418,8 @@ func TestContextHandler_WithBuiltinKeys_OTelSpanContext(t *testing.T) {
 	})
 
 	t.Run("omits trace context when no span in context", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a context handler with builtin keys but no active span
 		var buf bytes.Buffer
 
@@ -417,6 +448,8 @@ func TestContextHandler_WithBuiltinKeys_OTelSpanContext(t *testing.T) {
 	})
 
 	t.Run("preserves builtin keys through WithAttrs", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a context handler with builtin keys, then WithAttrs applied
 		var buf bytes.Buffer
 
@@ -455,6 +488,8 @@ func TestContextHandler_WithBuiltinKeys_OTelSpanContext(t *testing.T) {
 	})
 
 	t.Run("preserves builtin keys through WithGroup", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a context handler with builtin keys, then WithGroup applied
 		var buf bytes.Buffer
 
@@ -494,6 +529,8 @@ func TestContextHandler_WithBuiltinKeys_OTelSpanContext(t *testing.T) {
 	})
 
 	t.Run("works alongside custom context keys", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a context handler with both builtin keys and custom keys
 		var buf bytes.Buffer
 
@@ -537,7 +574,10 @@ func TestContextHandler_WithBuiltinKeys_OTelSpanContext(t *testing.T) {
 }
 
 func TestNewHandlerFromConfig(t *testing.T) {
+	t.Parallel()
 	t.Run("returns error with empty log level", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a config with empty level
 		cfg := vital.LogConfig{
 			Level:  "",
@@ -558,6 +598,8 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("returns error with empty format", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a config with empty format
 		cfg := vital.LogConfig{
 			Level:  "info",
@@ -578,6 +620,8 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("creates handler with debug level", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a config with debug level
 		cfg := vital.LogConfig{
 			Level:  "debug",
@@ -597,6 +641,8 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("creates handler with info level", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a config with info level
 		cfg := vital.LogConfig{
 			Level:  "info",
@@ -620,6 +666,8 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("creates handler with warn level", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a config with warn level
 		cfg := vital.LogConfig{
 			Level:  "warn",
@@ -647,6 +695,8 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("creates handler with error level", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a config with error level
 		cfg := vital.LogConfig{
 			Level:  "error",
@@ -670,6 +720,8 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("returns error with invalid log level", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a config with invalid level
 		cfg := vital.LogConfig{
 			Level:  "invalid",
@@ -690,6 +742,8 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("creates handler with JSON format", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a config with JSON format
 		cfg := vital.LogConfig{
 			Level:  "info",
@@ -710,6 +764,8 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("creates handler with text format", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a config with text format
 		cfg := vital.LogConfig{
 			Level:  "info",
@@ -730,6 +786,8 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("returns error with invalid format", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a config with invalid format
 		cfg := vital.LogConfig{
 			Level:  "info",
@@ -750,6 +808,8 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("creates handler with AddSource enabled", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a config with AddSource enabled
 		cfg := vital.LogConfig{
 			Level:     "info",
@@ -771,6 +831,8 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("creates handler with context handler options", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a config and context handler options
 		cfg := vital.LogConfig{
 			Level:  "info",
@@ -809,6 +871,8 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 
 	t.Run("creates handler with builtin keys option", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a config with builtin keys option
 		cfg := vital.LogConfig{
 			Level:  "info",

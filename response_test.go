@@ -40,6 +40,8 @@ func ExampleRespondProblem() {
 }
 
 func TestProblemDetail_MarshalJSON(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		problem  *vital.ProblemDetail
@@ -94,6 +96,8 @@ func TestProblemDetail_MarshalJSON(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			// given: a problem detail structure
 			problem := tt.problem
 
@@ -135,10 +139,14 @@ func TestProblemDetail_MarshalJSON(t *testing.T) {
 }
 
 func TestMarshalJSON_ReservedKeyError(t *testing.T) {
+	t.Parallel()
+
 	reservedKeys := []string{"type", "title", "status", "detail", "instance"}
 
 	for _, key := range reservedKeys {
 		t.Run(key, func(t *testing.T) {
+			t.Parallel()
+
 			// given: a problem detail with a reserved key as extension
 			problem := vital.NewProblemDetail(http.StatusBadRequest, "Bad Request",
 				vital.WithExtension(key, "value"),
@@ -160,7 +168,11 @@ func TestMarshalJSON_ReservedKeyError(t *testing.T) {
 }
 
 func TestNewProblemDetail(t *testing.T) {
+	t.Parallel()
+
 	t.Run("creates with status and title", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a status code and title
 		status := http.StatusNotFound
 		title := "Resource Not Found"
@@ -179,6 +191,8 @@ func TestNewProblemDetail(t *testing.T) {
 	})
 
 	t.Run("creates with options", func(t *testing.T) {
+		t.Parallel()
+
 		// given: options for a problem detail
 
 		// when: creating a new problem detail with options
@@ -214,7 +228,11 @@ func TestNewProblemDetail(t *testing.T) {
 }
 
 func TestWithExtension(t *testing.T) {
+	t.Parallel()
+
 	t.Run("allows non-reserved keys", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a problem detail with non-reserved extension keys
 		problem := vital.NewProblemDetail(http.StatusBadRequest, "Bad Request",
 			vital.WithExtension("custom_field", "value"),
@@ -246,7 +264,11 @@ func TestWithExtension(t *testing.T) {
 }
 
 func TestRespondProblem(t *testing.T) {
+	t.Parallel()
+
 	t.Run("returns correct status code and content type", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a problem detail with type and instance
 		problem := vital.BadRequest("Invalid email format",
 			vital.WithType("https://example.com/problems/validation"),
@@ -289,6 +311,8 @@ func TestRespondProblem(t *testing.T) {
 	})
 
 	t.Run("falls back to internal server error when encoding fails", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a problem detail that cannot be marshaled
 		problem := vital.NewProblemDetail(
 			http.StatusBadRequest,
@@ -324,6 +348,8 @@ func TestRespondProblem(t *testing.T) {
 }
 
 func TestCommonProblemConstructors(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name           string
 		constructor    func(string, ...vital.ProblemOption) *vital.ProblemDetail
@@ -406,6 +432,8 @@ func TestCommonProblemConstructors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			// given: a detail message
 			detail := "test detail message"
 
@@ -429,7 +457,11 @@ func TestCommonProblemConstructors(t *testing.T) {
 }
 
 func TestCommonProblemConstructors_WithOptions(t *testing.T) {
+	t.Parallel()
+
 	t.Run("accepts options", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a constructor with additional options
 
 		// when: creating a problem with options

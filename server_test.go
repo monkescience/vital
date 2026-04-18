@@ -17,7 +17,10 @@ import (
 )
 
 func TestNewServer(t *testing.T) {
+	t.Parallel()
 	t.Run("creates server with handler", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a basic HTTP handler
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -33,6 +36,8 @@ func TestNewServer(t *testing.T) {
 	})
 
 	t.Run("uses default timeouts", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a basic HTTP handler
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -60,6 +65,8 @@ func TestNewServer(t *testing.T) {
 	})
 
 	t.Run("configures port correctly", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a handler and desired port
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -77,6 +84,8 @@ func TestNewServer(t *testing.T) {
 	})
 
 	t.Run("configures custom timeouts", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a handler and custom timeout values
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -114,6 +123,8 @@ func TestNewServer(t *testing.T) {
 	})
 
 	t.Run("configures custom logger", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a handler and custom logger
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -130,6 +141,8 @@ func TestNewServer(t *testing.T) {
 	})
 
 	t.Run("applies multiple options", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a handler and multiple configuration options
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -152,7 +165,10 @@ func TestNewServer(t *testing.T) {
 }
 
 func TestServer_Validate(t *testing.T) {
+	t.Parallel()
 	t.Run("requires address before start", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a server without an address
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -170,6 +186,8 @@ func TestServer_Validate(t *testing.T) {
 	})
 
 	t.Run("requires both TLS files", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a server with an address but incomplete TLS config
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -192,7 +210,10 @@ func TestServer_Validate(t *testing.T) {
 }
 
 func TestServer_HTTP(t *testing.T) {
+	t.Parallel()
 	t.Run("starts and serves HTTP requests", func(t *testing.T) {
+		t.Parallel()
+
 		// given: an HTTP server on a specific port
 		responseBody := "test response"
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -267,7 +288,10 @@ func TestServer_HTTP(t *testing.T) {
 }
 
 func TestServer_Stop(t *testing.T) {
+	t.Parallel()
 	t.Run("gracefully shuts down server", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a running HTTP server
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -298,6 +322,8 @@ func TestServer_Stop(t *testing.T) {
 	})
 
 	t.Run("runs shutdown funcs in reverse order", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a running HTTP server with registered shutdown hooks
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -372,6 +398,8 @@ func TestServer_Stop(t *testing.T) {
 	})
 
 	t.Run("returns shutdown hook errors", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a running server with a failing shutdown hook
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -405,6 +433,8 @@ func TestServer_Stop(t *testing.T) {
 	})
 
 	t.Run("repeat stop calls replay hook errors", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a running server whose shutdown hook returns an error
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -451,6 +481,8 @@ func TestServer_Stop(t *testing.T) {
 	})
 
 	t.Run("runs hooks with a fresh timeout budget", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a slow in-flight request and a longer hook timeout
 		requestStarted := make(chan struct{})
 		releaseRequest := make(chan struct{})
@@ -532,6 +564,8 @@ func TestServer_Stop(t *testing.T) {
 	})
 
 	t.Run("hooks share remaining shutdown budget by default", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a slow in-flight request and NO explicit hooks timeout
 		requestStarted := make(chan struct{})
 		releaseRequest := make(chan struct{})
@@ -602,6 +636,8 @@ func TestServer_Stop(t *testing.T) {
 	})
 
 	t.Run("respects shutdown timeout", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a server with a short shutdown timeout and a slow endpoint
 		mux := http.NewServeMux()
 		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -642,7 +678,10 @@ func TestServer_Stop(t *testing.T) {
 }
 
 func TestServer_Run(t *testing.T) {
+	t.Parallel()
 	t.Run("returns startup errors instead of exiting", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a server with invalid startup configuration
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -660,6 +699,8 @@ func TestServer_Run(t *testing.T) {
 	})
 
 	t.Run("stops gracefully when context is canceled", func(t *testing.T) {
+		t.Parallel()
+
 		// given: a running server controlled by context
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
