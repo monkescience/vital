@@ -4,5 +4,17 @@
 *.ipr
 *.iws
 
+# VS Code
+.vscode/
+
+# Build
+bin/
+
 # Test coverage
+coverage/
 coverage.out
+coverage.html
+test-report.json
+
+# macOS
+.DS_Store
