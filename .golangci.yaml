@@ -9,7 +9,6 @@ linters:
     tagliatelle:
       case:
         rules:
-          json: snake
           yaml: snake
 
   exclusions:
