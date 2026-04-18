@@ -1,5 +1,24 @@
 # Changelog
 
+## [v0.5.0](https://github.com/monkescience/vital/compare/v0.4.0...v0.5.0) (2026-04-18)
+
+### ⚠ BREAKING CHANGES
+
+- drop json/yaml tags from LogConfig ([1aa79c6](https://github.com/monkescience/vital/commit/1aa79c627192e1395bef331dca802018b41c7e9b))
+- drop middleware duplicated by chi ([0a32761](https://github.com/monkescience/vital/commit/0a327613548f589ab2715884c314c073906552bc))
+- enforce Timeout via http.TimeoutHandler ([74bdc4d](https://github.com/monkescience/vital/commit/74bdc4d3946f14161c0f24fb4c8dbe666ad6d18e))
+### Features
+
+- drop middleware duplicated by chi ([0a32761](https://github.com/monkescience/vital/commit/0a327613548f589ab2715884c314c073906552bc))
+- enforce Timeout via http.TimeoutHandler ([74bdc4d](https://github.com/monkescience/vital/commit/74bdc4d3946f14161c0f24fb4c8dbe666ad6d18e))
+### Bug Fixes
+
+- use request context for ready response write ([e988a99](https://github.com/monkescience/vital/commit/e988a99c48084afee4c7dc10aa7d84dc520072ae))
+- return a copy from Registry.Keys ([66c25ce](https://github.com/monkescience/vital/commit/66c25cec02a623f8b3ffc9e822e73d4f92986cab))
+- replay shutdown hook errors on repeat Stop calls ([bfd1366](https://github.com/monkescience/vital/commit/bfd136642a5e4345f8f53245680a313e84b64952))
+- log shutdown signal before stopping server ([2127030](https://github.com/monkescience/vital/commit/2127030438048709dd3b3cf773ee3dd4b6f3f381))
+- log hijacked connections in RequestLogger ([142e0fb](https://github.com/monkescience/vital/commit/142e0fbe83debfb9d0a5f0e92e87bf6e57c7e191))
+
 ## [v0.4.0](https://github.com/monkescience/vital/compare/v0.3.0...v0.4.0) (2026-03-29)
 
 ### ⚠ BREAKING CHANGES
