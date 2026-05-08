@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.5.1](https://github.com/monkescience/vital/compare/v0.5.0...v0.5.1) (2026-05-08)
+
+### Bug Fixes
+
+- **deps:** update opentelemetry-go monorepo to v1.43.0 (#31) ([0f2629c](https://github.com/monkescience/vital/commit/0f2629c31578e3ddf71cf6ecdde6c81eae0ef5ef))
+
 ## [v0.5.0](https://github.com/monkescience/vital/compare/v0.4.0...v0.5.0) (2026-04-18)
 
 ### ⚠ BREAKING CHANGES
