@@ -115,7 +115,7 @@ func WithCheckers(checkers ...Checker) HealthHandlerOption {
 	return func(c *handlerConfig) { c.checkers = append(c.checkers, checkers...) }
 }
 
-// WithStartedFunc sets the startup probe function used by /health/started.
+// WithStartedFunc sets the startup probe function used by /startupz.
 func WithStartedFunc(startedFunc func() bool) HealthHandlerOption {
 	return func(c *handlerConfig) { c.startedFunc = startedFunc }
 }
@@ -126,7 +126,7 @@ func WithReadyOptions(opts ...ReadyOption) HealthHandlerOption {
 }
 
 // NewHealthHandler creates an HTTP handler that provides health check endpoints
-// at /health/live, /health/started, and /health/ready.
+// at /livez, /startupz, and /readyz.
 func NewHealthHandler(opts ...HealthHandlerOption) http.Handler {
 	var handlerCfg handlerConfig
 	for _, o := range opts {
@@ -135,10 +135,10 @@ func NewHealthHandler(opts ...HealthHandlerOption) http.Handler {
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /health/live", LiveHandlerFunc())
-	mux.HandleFunc("GET /health/started", StartedHandlerFunc(handlerCfg.startedFunc))
+	mux.HandleFunc("GET /livez", LiveHandlerFunc())
+	mux.HandleFunc("GET /startupz", StartedHandlerFunc(handlerCfg.startedFunc))
 	mux.HandleFunc(
-		"GET /health/ready",
+		"GET /readyz",
 		ReadyHandlerFunc(handlerCfg.version, handlerCfg.environment, handlerCfg.checkers, handlerCfg.readyOpts...),
 	)
 

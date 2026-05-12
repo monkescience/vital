@@ -62,9 +62,9 @@ func main() {
 Test the server:
 
 ```bash
-curl http://localhost:8080/health/live
-curl http://localhost:8080/health/started
-curl http://localhost:8080/health/ready
+curl http://localhost:8080/livez
+curl http://localhost:8080/startupz
+curl http://localhost:8080/readyz
 curl http://localhost:8080/api/hello
 ```
 
@@ -150,18 +150,18 @@ mux.Handle("/", healthHandler)
 ```
 
 This creates three endpoints:
-- `GET /health/live` - Liveness probe (always returns 200 OK)
-- `GET /health/started` - Startup probe (returns 200 OK by default)
-- `GET /health/ready` - Readiness probe (runs health checks)
+- `GET /livez` - Liveness probe (always returns 200 OK)
+- `GET /startupz` - Startup probe (returns 200 OK by default)
+- `GET /readyz` - Readiness probe (runs health checks)
 
 ### Standalone Health Handlers
 
 For custom routing, use the individual handler functions directly:
 
 ```go
-mux.HandleFunc("GET /healthz", vital.LiveHandlerFunc())
-mux.HandleFunc("GET /ready", vital.ReadyHandlerFunc("1.0.0", "production", checkers))
-mux.HandleFunc("GET /started", vital.StartedHandlerFunc(startedFunc))
+mux.HandleFunc("GET /livez", vital.LiveHandlerFunc())
+mux.HandleFunc("GET /readyz", vital.ReadyHandlerFunc("1.0.0", "production", checkers))
+mux.HandleFunc("GET /startupz", vital.StartedHandlerFunc(startedFunc))
 ```
 
 ### Startup Probe
@@ -181,8 +181,14 @@ healthHandler := vital.NewHealthHandler(
 started = true
 ```
 
-`/health/started` returns `503 Service Unavailable` until the function returns `true`.
+`/startupz` returns `503 Service Unavailable` until the function returns `true`.
 If no `WithStartedFunc` is configured, it behaves like the liveness endpoint.
+
+Use `/startupz` when startup is a distinct state from liveness, such as warm-up,
+migrations, cache loading, or other initialization that must finish before normal
+probes continue. If your service has no separate startup phase, you can ignore
+`/startupz` and configure probes with `/livez` for liveness and `/readyz` for
+readiness.
 
 ### Custom Health Checkers
 
@@ -506,7 +512,7 @@ func main() {
 |--------|------|-------------|
 | `WithVersion` | `string` | Version string in readiness response |
 | `WithEnvironment` | `string` | Environment string in readiness response |
-| `WithStartedFunc` | `func() bool` | Startup probe function for `/health/started` |
+| `WithStartedFunc` | `func() bool` | Startup probe function for `/startupz` |
 | `WithCheckers` | `...Checker` | Custom health checkers |
 | `WithReadyOptions` | `...ReadyOption` | Readiness-specific options |
 
