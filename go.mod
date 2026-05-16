@@ -1,6 +1,6 @@
 module github.com/monkescience/vital
 
-go 1.25.4
+go 1.26
 
 require (
 	go.opentelemetry.io/otel/sdk v1.43.0
