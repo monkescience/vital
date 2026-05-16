@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os/signal"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -297,9 +298,7 @@ func (server *Server) runShutdownFuncs(ctx context.Context) error {
 	server.shutdownOnce.Do(func() {
 		var runErr error
 
-		for idx := len(server.shutdownFuncs) - 1; idx >= 0; idx-- {
-			shutdownFunc := server.shutdownFuncs[idx]
-
+		for idx, shutdownFunc := range slices.Backward(server.shutdownFuncs) {
 			func(hookIndex int) {
 				defer func() {
 					if recovered := recover(); recovered != nil {
