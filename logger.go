@@ -127,14 +127,12 @@ func NewContextHandler(handler slog.Handler, opts ...ContextHandlerOption) *Cont
 		handler = contextHandler.handler
 	}
 
-	// Create handler with empty registry
 	//nolint:varnamelen // h is a conventional short name for handler variables
 	h := &ContextHandler{
 		handler:  handler,
 		registry: NewRegistry(),
 	}
 
-	// Apply options
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -159,7 +157,6 @@ func (h *ContextHandler) Handle(ctx context.Context, record slog.Record) error {
 		}
 	}
 
-	// Extract all registered context keys and add them to the log record
 	for _, key := range h.registry.Keys() {
 		if value := ctx.Value(key); value != nil {
 			record.AddAttrs(slog.Attr{

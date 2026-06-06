@@ -113,14 +113,12 @@ var reservedKeys = map[string]struct{}{
 // MarshalJSON implements custom JSON marshaling to include extensions.
 // It returns an error if any extension key conflicts with a reserved RFC 9457 field name.
 func (p ProblemDetail) MarshalJSON() ([]byte, error) {
-	// Validate extension keys before marshaling
 	for key := range p.Extensions {
 		if _, reserved := reservedKeys[key]; reserved {
 			return nil, fmt.Errorf("%w: %q", ErrReservedExtensionKey, key)
 		}
 	}
 
-	// Create a map with the standard fields
 	fields := make(map[string]any)
 
 	if p.Type != "" {
@@ -138,7 +136,6 @@ func (p ProblemDetail) MarshalJSON() ([]byte, error) {
 		fields["instance"] = p.Instance
 	}
 
-	// Add extensions
 	maps.Copy(fields, p.Extensions)
 
 	data, err := json.Marshal(fields)
@@ -176,8 +173,6 @@ func RespondProblem(ctx context.Context, w http.ResponseWriter, problem *Problem
 		slog.ErrorContext(ctx, "failed to write fallback problem detail response", slog.Any("error", fallbackErr))
 	}
 }
-
-// Common problem detail constructors for standard HTTP errors
 
 // newProblem is a helper that creates a ProblemDetail with detail prepended to options.
 func newProblem(status int, title, detail string, opts ...ProblemOption) *ProblemDetail {

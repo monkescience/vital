@@ -139,7 +139,6 @@ func WithLogger(logger *slog.Logger) ServerOption {
 
 // NewServer creates a new Server with the provided handler and options.
 func NewServer(handler http.Handler, opts ...ServerOption) *Server {
-	// Use default logger
 	defaultLogger := slog.Default()
 
 	//nolint:exhaustruct // Only setting required fields, others use sensible defaults
@@ -160,7 +159,6 @@ func NewServer(handler http.Handler, opts ...ServerOption) *Server {
 		logger:               defaultLogger,
 	}
 
-	// Apply all options
 	for _, opt := range opts {
 		opt(server)
 	}
@@ -191,10 +189,8 @@ func (server *Server) Run() error {
 
 // RunContext starts the server and blocks until the context is canceled or the server fails.
 func (server *Server) RunContext(ctx context.Context) error {
-	// Channel to listen for errors from the server
 	serverErrors := make(chan error, defaultErrorBuffer)
 
-	// Start server in a goroutine
 	go func() {
 		err := server.Start()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -202,7 +198,6 @@ func (server *Server) RunContext(ctx context.Context) error {
 		}
 	}()
 
-	// Block until we receive a cancellation signal or an error
 	select {
 	case err := <-serverErrors:
 		hooksErr := server.runShutdownFuncsWithTimeout(ctx)
