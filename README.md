@@ -1,13 +1,12 @@
 # Vital
 
-HTTP server utilities for Go: graceful shutdown, health checks, RFC 9457
-problem-detail responses, and a context-aware `slog` handler.
+HTTP server utilities for Go: graceful shutdown, health checks, and a
+context-aware `slog` handler.
 
 ## Features
 
 - **Server Management**: Graceful shutdown, TLS support, configurable timeouts
 - **Health Checks**: Liveness, startup, and readiness endpoints with custom checkers
-- **Error Responses**: RFC 9457 ProblemDetail for consistent error handling
 - **Structured Logging**: Context-aware `slog` handler with trace correlation
 
 ## Installation
@@ -254,77 +253,6 @@ Readiness response:
 
 Vital does not ship HTTP middleware — use [`chi/middleware`](https://pkg.go.dev/github.com/go-chi/chi/v5/middleware) or the standard library.
 
-## Error Responses
-
-Use RFC 9457 ProblemDetail for consistent error responses:
-
-### Standard Errors
-
-```go
-// 400 Bad Request
-vital.RespondProblem(r.Context(), w, vital.BadRequest("invalid input"))
-
-// 401 Unauthorized
-vital.RespondProblem(r.Context(), w, vital.Unauthorized("authentication required"))
-
-// 403 Forbidden
-vital.RespondProblem(r.Context(), w, vital.Forbidden("insufficient permissions"))
-
-// 404 Not Found
-vital.RespondProblem(r.Context(), w, vital.NotFound("user not found"))
-
-// 405 Method Not Allowed
-vital.RespondProblem(r.Context(), w, vital.MethodNotAllowed("GET not supported"))
-
-// 409 Conflict
-vital.RespondProblem(r.Context(), w, vital.Conflict("email already exists"))
-
-// 410 Gone
-vital.RespondProblem(r.Context(), w, vital.Gone("resource has been removed"))
-
-// 413 Request Entity Too Large
-vital.RespondProblem(r.Context(), w, vital.RequestEntityTooLarge("payload exceeds 1 MB"))
-
-// 422 Unprocessable Entity
-vital.RespondProblem(r.Context(), w, vital.UnprocessableEntity("validation failed"))
-
-// 429 Too Many Requests
-vital.RespondProblem(r.Context(), w, vital.TooManyRequests("rate limit exceeded"))
-
-// 500 Internal Server Error
-vital.RespondProblem(r.Context(), w, vital.InternalServerError("database error"))
-
-// 503 Service Unavailable
-vital.RespondProblem(r.Context(), w, vital.ServiceUnavailable("service temporarily unavailable"))
-```
-
-### Custom ProblemDetail
-
-```go
-problem := vital.NewProblemDetail(
-	http.StatusTeapot,
-	"I'm a teapot",
-	vital.WithType("https://example.com/errors/teapot"),
-	vital.WithDetail("Cannot brew coffee, I'm a teapot"),
-	vital.WithInstance("/api/coffee/123"),
-	vital.WithExtension("retry_after", 300),
-)
-
-vital.RespondProblem(r.Context(), w, problem)
-```
-
-Response:
-```json
-{
-  "type": "https://example.com/errors/teapot",
-  "title": "I'm a teapot",
-  "status": 418,
-  "detail": "Cannot brew coffee, I'm a teapot",
-  "instance": "/api/coffee/123",
-  "retry_after": 300
-}
-```
-
 ## Structured Logging
 
 ### Context-Aware Logger
@@ -446,7 +374,7 @@ func main() {
 	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, r *http.Request) {
 		var req CreateUserRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			vital.RespondProblem(r.Context(), w, vital.BadRequest(err.Error()))
+			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
 		}
 
@@ -457,7 +385,7 @@ func main() {
 		)
 		if err != nil {
 			logger.ErrorContext(r.Context(), "failed to create user", slog.Any("error", err))
-			vital.RespondProblem(r.Context(), w, vital.InternalServerError("failed to create user"))
+			http.Error(w, "failed to create user", http.StatusInternalServerError)
 			return
 		}
 
