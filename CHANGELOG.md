@@ -1,5 +1,14 @@
 # Changelog
 
+## [v0.7.0](https://github.com/monkescience/vital/compare/v0.6.0...v0.7.0) (2026-07-18)
+
+### ⚠ BREAKING CHANGES
+
+- **http:** remove problem response API ([00a7ffb](https://github.com/monkescience/vital/commit/00a7ffbfa2f572a5e5c117f744f23b351ccc9627))
+### Bug Fixes
+
+- **deps:** update opentelemetry-go monorepo to v1.44.0 (#41) ([44ed623](https://github.com/monkescience/vital/commit/44ed62332f4f456416763bc6c6c8c81d5655d228))
+
 ## [v0.6.0](https://github.com/monkescience/vital/compare/v0.5.0...v0.6.0) (2026-05-12)
 
 ### ⚠ BREAKING CHANGES
