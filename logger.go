@@ -11,6 +11,9 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// Compile-time check that ContextHandler implements slog.Handler.
+var _ slog.Handler = (*ContextHandler)(nil)
+
 // ContextKey is a strongly-typed key for storing values in context that should be logged.
 type ContextKey struct {
 	Name string

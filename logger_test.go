@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
-	"strings"
+	"os"
 	"testing"
 
+	"github.com/monkescience/testastic"
 	"github.com/monkescience/vital"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func TestContextHandler(t *testing.T) {
@@ -38,17 +39,11 @@ func TestContextHandler(t *testing.T) {
 		var logEntry map[string]any
 
 		err := json.Unmarshal(buf.Bytes(), &logEntry)
-		if err != nil {
-			t.Fatalf("failed to parse log output: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if logEntry["test_key"] != "test_value" {
-			t.Errorf("expected test_key='test_value', got %v", logEntry["test_key"])
-		}
+		testastic.DeepEqual[any](t, "test_value", logEntry["test_key"])
 
-		if logEntry["msg"] != "test message" {
-			t.Errorf("expected msg='test message', got %v", logEntry["msg"])
-		}
+		testastic.DeepEqual[any](t, "test message", logEntry["msg"])
 	})
 
 	t.Run("handles multiple context keys", func(t *testing.T) {
@@ -75,17 +70,11 @@ func TestContextHandler(t *testing.T) {
 		var logEntry map[string]any
 
 		err := json.Unmarshal(buf.Bytes(), &logEntry)
-		if err != nil {
-			t.Fatalf("failed to parse log output: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if logEntry["key1"] != "value1" {
-			t.Errorf("expected key1='value1', got %v", logEntry["key1"])
-		}
+		testastic.DeepEqual[any](t, "value1", logEntry["key1"])
 
-		if logEntry["key2"] != "value2" {
-			t.Errorf("expected key2='value2', got %v", logEntry["key2"])
-		}
+		testastic.DeepEqual[any](t, "value2", logEntry["key2"])
 	})
 
 	t.Run("omits missing context value", func(t *testing.T) {
@@ -107,13 +96,9 @@ func TestContextHandler(t *testing.T) {
 		var logEntry map[string]any
 
 		err := json.Unmarshal(buf.Bytes(), &logEntry)
-		if err != nil {
-			t.Fatalf("failed to parse log output: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if _, exists := logEntry["missing_key"]; exists {
-			t.Error("expected missing_key to not be in log output")
-		}
+		testastic.MapNotHasKey(t, logEntry, "missing_key")
 	})
 
 	t.Run("includes added attributes", func(t *testing.T) {
@@ -135,13 +120,9 @@ func TestContextHandler(t *testing.T) {
 		var logEntry map[string]any
 
 		err := json.Unmarshal(buf.Bytes(), &logEntry)
-		if err != nil {
-			t.Fatalf("failed to parse log output: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if logEntry["attr1"] != "value1" {
-			t.Errorf("expected attr1='value1', got %v", logEntry["attr1"])
-		}
+		testastic.DeepEqual[any](t, "value1", logEntry["attr1"])
 	})
 
 	t.Run("creates groups", func(t *testing.T) {
@@ -163,18 +144,12 @@ func TestContextHandler(t *testing.T) {
 		var logEntry map[string]any
 
 		err := json.Unmarshal(buf.Bytes(), &logEntry)
-		if err != nil {
-			t.Fatalf("failed to parse log output: %v", err)
-		}
+		testastic.NoError(t, err)
 
 		group, ok := logEntry["group1"].(map[string]any)
-		if !ok {
-			t.Fatal("expected group1 to be a map")
-		}
+		testastic.True(t, ok)
 
-		if group["key"] != "value" {
-			t.Errorf("expected group1.key='value', got %v", group["key"])
-		}
+		testastic.DeepEqual[any](t, "value", group["key"])
 	})
 
 	t.Run("avoids nesting when wrapping context handler", func(t *testing.T) {
@@ -188,9 +163,7 @@ func TestContextHandler(t *testing.T) {
 		handler2 := vital.NewContextHandler(handler1)
 
 		// then: it should unwrap and use the original base handler
-		if handler2.Unwrap() != baseHandler {
-			t.Error("expected handler2 to unwrap handler1 and use the base handler")
-		}
+		testastic.True(t, handler2.Unwrap() == baseHandler)
 	})
 
 	t.Run("respects log level", func(t *testing.T) {
@@ -207,17 +180,11 @@ func TestContextHandler(t *testing.T) {
 		// when: checking if different log levels are enabled
 
 		// then: only Warn and above should be enabled
-		if handler.Enabled(ctx, slog.LevelInfo) {
-			t.Error("expected LevelInfo to be disabled when handler level is Warn")
-		}
+		testastic.False(t, handler.Enabled(ctx, slog.LevelInfo))
 
-		if !handler.Enabled(ctx, slog.LevelWarn) {
-			t.Error("expected LevelWarn to be enabled")
-		}
+		testastic.True(t, handler.Enabled(ctx, slog.LevelWarn))
 
-		if !handler.Enabled(ctx, slog.LevelError) {
-			t.Error("expected LevelError to be enabled")
-		}
+		testastic.True(t, handler.Enabled(ctx, slog.LevelError))
 	})
 
 	t.Run("handles different value types", func(t *testing.T) {
@@ -246,17 +213,11 @@ func TestContextHandler(t *testing.T) {
 		// then: all values should be correctly logged with their types
 		logOutput := buf.String()
 
-		if !strings.Contains(logOutput, `"string_val":"hello"`) {
-			t.Error("expected string_val to be in log output")
-		}
+		testastic.Contains(t, logOutput, `"string_val":"hello"`)
 
-		if !strings.Contains(logOutput, `"int_val":42`) {
-			t.Error("expected int_val to be in log output")
-		}
+		testastic.Contains(t, logOutput, `"int_val":42`)
 
-		if !strings.Contains(logOutput, `"bool_val":true`) {
-			t.Error("expected bool_val to be in log output")
-		}
+		testastic.Contains(t, logOutput, `"bool_val":true`)
 	})
 }
 
@@ -285,9 +246,7 @@ func TestRegistry(t *testing.T) {
 			}
 		}
 
-		if !found {
-			t.Error("expected test_key to be registered")
-		}
+		testastic.True(t, found)
 	})
 
 	t.Run("reflects keys registered after first access", func(t *testing.T) {
@@ -300,9 +259,7 @@ func TestRegistry(t *testing.T) {
 		registry.Register(key1)
 
 		keys := registry.Keys()
-		if len(keys) != 1 {
-			t.Fatalf("expected 1 key, got %d", len(keys))
-		}
+		testastic.Len(t, keys, 1)
 
 		// when: registering a new key after Keys() was called
 		key2 := vital.ContextKey{Name: "key2"}
@@ -310,9 +267,7 @@ func TestRegistry(t *testing.T) {
 
 		// then: subsequent Keys() call should include the new key
 		keys = registry.Keys()
-		if len(keys) != 2 {
-			t.Errorf("expected 2 keys after registering second key, got %d", len(keys))
-		}
+		testastic.Len(t, keys, 2)
 	})
 
 	t.Run("returns copy so callers cannot mutate the cache", func(t *testing.T) {
@@ -336,9 +291,7 @@ func TestRegistry(t *testing.T) {
 			t.Fatalf("expected 1 key after tamper, got %d", len(fresh))
 		}
 
-		if fresh[0].Name != "original" {
-			t.Errorf("expected internal cache untouched, got %q", fresh[0].Name)
-		}
+		testastic.Equal(t, "original", fresh[0].Name)
 	})
 
 	t.Run("returns all registered keys", func(t *testing.T) {
@@ -357,19 +310,33 @@ func TestRegistry(t *testing.T) {
 		keys := registry.Keys()
 
 		// then: it should return all registered keys
-		if len(keys) != 2 {
-			t.Errorf("expected 2 keys, got %d", len(keys))
-		}
+		testastic.Len(t, keys, 2)
 
 		keyNames := make(map[string]bool)
 		for _, key := range keys {
 			keyNames[key.Name] = true
 		}
 
-		if !keyNames["key1"] || !keyNames["key2"] {
-			t.Error("expected both key1 and key2 to be in registry")
-		}
+		testastic.True(t, keyNames["key1"])
+		testastic.True(t, keyNames["key2"])
 	})
+}
+
+// testSpanContext builds a valid span context using only the otel/trace API,
+// avoiding a direct dependency on the OTel SDK.
+func testSpanContext(tb testing.TB) (context.Context, trace.SpanContext) {
+	tb.Helper()
+
+	spanCtx := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: trace.TraceID{
+			0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+			0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+		},
+		SpanID:     trace.SpanID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08},
+		TraceFlags: trace.FlagsSampled,
+	})
+
+	return trace.ContextWithSpanContext(context.Background(), spanCtx), spanCtx
 }
 
 func TestContextHandler_WithBuiltinKeys_OTelSpanContext(t *testing.T) {
@@ -384,14 +351,7 @@ func TestContextHandler_WithBuiltinKeys_OTelSpanContext(t *testing.T) {
 		handler := vital.NewContextHandler(baseHandler, vital.WithBuiltinKeys())
 		logger := slog.New(handler)
 
-		spanExporter := tracetest.NewInMemoryExporter()
-		tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(spanExporter))
-		tracer := tp.Tracer("test")
-
-		ctx, span := tracer.Start(context.Background(), "test-span")
-		defer span.End()
-
-		spanCtx := span.SpanContext()
+		ctx, spanCtx := testSpanContext(t)
 
 		// when: logging with the span context
 		logger.InfoContext(ctx, "test message")
@@ -400,21 +360,13 @@ func TestContextHandler_WithBuiltinKeys_OTelSpanContext(t *testing.T) {
 		var logEntry map[string]any
 
 		err := json.Unmarshal(buf.Bytes(), &logEntry)
-		if err != nil {
-			t.Fatalf("failed to parse log output: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if logEntry["trace_id"] != spanCtx.TraceID().String() {
-			t.Errorf("expected trace_id=%s, got %v", spanCtx.TraceID().String(), logEntry["trace_id"])
-		}
+		testastic.DeepEqual[any](t, spanCtx.TraceID().String(), logEntry["trace_id"])
 
-		if logEntry["span_id"] != spanCtx.SpanID().String() {
-			t.Errorf("expected span_id=%s, got %v", spanCtx.SpanID().String(), logEntry["span_id"])
-		}
+		testastic.DeepEqual[any](t, spanCtx.SpanID().String(), logEntry["span_id"])
 
-		if logEntry["trace_flags"] != spanCtx.TraceFlags().String() {
-			t.Errorf("expected trace_flags=%s, got %v", spanCtx.TraceFlags().String(), logEntry["trace_flags"])
-		}
+		testastic.DeepEqual[any](t, spanCtx.TraceFlags().String(), logEntry["trace_flags"])
 	})
 
 	t.Run("omits trace context when no span in context", func(t *testing.T) {
@@ -434,17 +386,11 @@ func TestContextHandler_WithBuiltinKeys_OTelSpanContext(t *testing.T) {
 		var logEntry map[string]any
 
 		err := json.Unmarshal(buf.Bytes(), &logEntry)
-		if err != nil {
-			t.Fatalf("failed to parse log output: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if _, exists := logEntry["trace_id"]; exists {
-			t.Error("expected trace_id to not be in log output")
-		}
+		testastic.MapNotHasKey(t, logEntry, "trace_id")
 
-		if _, exists := logEntry["span_id"]; exists {
-			t.Error("expected span_id to not be in log output")
-		}
+		testastic.MapNotHasKey(t, logEntry, "span_id")
 	})
 
 	t.Run("preserves builtin keys through WithAttrs", func(t *testing.T) {
@@ -458,14 +404,7 @@ func TestContextHandler_WithBuiltinKeys_OTelSpanContext(t *testing.T) {
 		logger := slog.New(handler)
 		logger = logger.With(slog.String("service", "test"))
 
-		spanExporter := tracetest.NewInMemoryExporter()
-		tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(spanExporter))
-		tracer := tp.Tracer("test")
-
-		ctx, span := tracer.Start(context.Background(), "test-span")
-		defer span.End()
-
-		spanCtx := span.SpanContext()
+		ctx, spanCtx := testSpanContext(t)
 
 		// when: logging
 		logger.InfoContext(ctx, "test message")
@@ -474,17 +413,11 @@ func TestContextHandler_WithBuiltinKeys_OTelSpanContext(t *testing.T) {
 		var logEntry map[string]any
 
 		err := json.Unmarshal(buf.Bytes(), &logEntry)
-		if err != nil {
-			t.Fatalf("failed to parse log output: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if logEntry["trace_id"] != spanCtx.TraceID().String() {
-			t.Errorf("expected trace_id=%s, got %v", spanCtx.TraceID().String(), logEntry["trace_id"])
-		}
+		testastic.DeepEqual[any](t, spanCtx.TraceID().String(), logEntry["trace_id"])
 
-		if logEntry["service"] != "test" {
-			t.Errorf("expected service=test, got %v", logEntry["service"])
-		}
+		testastic.DeepEqual[any](t, "test", logEntry["service"])
 	})
 
 	t.Run("preserves builtin keys through WithGroup", func(t *testing.T) {
@@ -498,14 +431,7 @@ func TestContextHandler_WithBuiltinKeys_OTelSpanContext(t *testing.T) {
 		logger := slog.New(handler)
 		loggerWithGroup := logger.WithGroup("group1")
 
-		spanExporter := tracetest.NewInMemoryExporter()
-		tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(spanExporter))
-		tracer := tp.Tracer("test")
-
-		ctx, span := tracer.Start(context.Background(), "test-span")
-		defer span.End()
-
-		spanCtx := span.SpanContext()
+		ctx, spanCtx := testSpanContext(t)
 
 		// when: logging
 		loggerWithGroup.InfoContext(ctx, "test message", slog.String("key", "value"))
@@ -514,18 +440,12 @@ func TestContextHandler_WithBuiltinKeys_OTelSpanContext(t *testing.T) {
 		var logEntry map[string]any
 
 		err := json.Unmarshal(buf.Bytes(), &logEntry)
-		if err != nil {
-			t.Fatalf("failed to parse log output: %v", err)
-		}
+		testastic.NoError(t, err)
 
 		group, ok := logEntry["group1"].(map[string]any)
-		if !ok {
-			t.Fatal("expected group1 to be a map")
-		}
+		testastic.True(t, ok)
 
-		if group["trace_id"] != spanCtx.TraceID().String() {
-			t.Errorf("expected trace_id=%s, got %v", spanCtx.TraceID().String(), group["trace_id"])
-		}
+		testastic.DeepEqual[any](t, spanCtx.TraceID().String(), group["trace_id"])
 	})
 
 	t.Run("works alongside custom context keys", func(t *testing.T) {
@@ -542,15 +462,8 @@ func TestContextHandler_WithBuiltinKeys_OTelSpanContext(t *testing.T) {
 		)
 		logger := slog.New(handler)
 
-		spanExporter := tracetest.NewInMemoryExporter()
-		tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(spanExporter))
-		tracer := tp.Tracer("test")
-
-		ctx, span := tracer.Start(context.Background(), "test-span")
-		defer span.End()
-
+		ctx, spanCtx := testSpanContext(t)
 		ctx = context.WithValue(ctx, customKey, "req-123")
-		spanCtx := span.SpanContext()
 
 		// when: logging
 		logger.InfoContext(ctx, "test message")
@@ -559,17 +472,11 @@ func TestContextHandler_WithBuiltinKeys_OTelSpanContext(t *testing.T) {
 		var logEntry map[string]any
 
 		err := json.Unmarshal(buf.Bytes(), &logEntry)
-		if err != nil {
-			t.Fatalf("failed to parse log output: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if logEntry["trace_id"] != spanCtx.TraceID().String() {
-			t.Errorf("expected trace_id=%s, got %v", spanCtx.TraceID().String(), logEntry["trace_id"])
-		}
+		testastic.DeepEqual[any](t, spanCtx.TraceID().String(), logEntry["trace_id"])
 
-		if logEntry["request_id"] != "req-123" {
-			t.Errorf("expected request_id=req-123, got %v", logEntry["request_id"])
-		}
+		testastic.DeepEqual[any](t, "req-123", logEntry["request_id"])
 	})
 }
 
@@ -588,13 +495,9 @@ func TestNewHandlerFromConfig(t *testing.T) {
 		handler, err := vital.NewHandlerFromConfig(cfg)
 
 		// then: it should return an error
-		if err == nil {
-			t.Error("expected error for empty log level")
-		}
+		testastic.Error(t, err)
 
-		if handler != nil {
-			t.Error("expected nil handler when error occurs")
-		}
+		testastic.Nil(t, handler)
 	})
 
 	t.Run("returns error with empty format", func(t *testing.T) {
@@ -610,13 +513,9 @@ func TestNewHandlerFromConfig(t *testing.T) {
 		handler, err := vital.NewHandlerFromConfig(cfg)
 
 		// then: it should return an error
-		if err == nil {
-			t.Error("expected error for empty format")
-		}
+		testastic.Error(t, err)
 
-		if handler != nil {
-			t.Error("expected nil handler when error occurs")
-		}
+		testastic.Nil(t, handler)
 	})
 
 	t.Run("creates handler with debug level", func(t *testing.T) {
@@ -635,9 +534,7 @@ func TestNewHandlerFromConfig(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if !handler.Enabled(context.Background(), slog.LevelDebug) {
-			t.Error("expected debug level to be enabled")
-		}
+		testastic.True(t, handler.Enabled(context.Background(), slog.LevelDebug))
 	})
 
 	t.Run("creates handler with info level", func(t *testing.T) {
@@ -656,13 +553,9 @@ func TestNewHandlerFromConfig(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if !handler.Enabled(context.Background(), slog.LevelInfo) {
-			t.Error("expected info level to be enabled")
-		}
+		testastic.True(t, handler.Enabled(context.Background(), slog.LevelInfo))
 
-		if handler.Enabled(context.Background(), slog.LevelDebug) {
-			t.Error("expected debug level to be disabled")
-		}
+		testastic.False(t, handler.Enabled(context.Background(), slog.LevelDebug))
 	})
 
 	t.Run("creates handler with warn level", func(t *testing.T) {
@@ -681,17 +574,11 @@ func TestNewHandlerFromConfig(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if !handler.Enabled(context.Background(), slog.LevelWarn) {
-			t.Error("expected warn level to be enabled")
-		}
+		testastic.True(t, handler.Enabled(context.Background(), slog.LevelWarn))
 
-		if !handler.Enabled(context.Background(), slog.LevelError) {
-			t.Error("expected error level to be enabled")
-		}
+		testastic.True(t, handler.Enabled(context.Background(), slog.LevelError))
 
-		if handler.Enabled(context.Background(), slog.LevelInfo) {
-			t.Error("expected info level to be disabled")
-		}
+		testastic.False(t, handler.Enabled(context.Background(), slog.LevelInfo))
 	})
 
 	t.Run("creates handler with error level", func(t *testing.T) {
@@ -710,13 +597,9 @@ func TestNewHandlerFromConfig(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if !handler.Enabled(context.Background(), slog.LevelError) {
-			t.Error("expected error level to be enabled")
-		}
+		testastic.True(t, handler.Enabled(context.Background(), slog.LevelError))
 
-		if handler.Enabled(context.Background(), slog.LevelWarn) {
-			t.Error("expected warn level to be disabled")
-		}
+		testastic.False(t, handler.Enabled(context.Background(), slog.LevelWarn))
 	})
 
 	t.Run("returns error with invalid log level", func(t *testing.T) {
@@ -732,13 +615,9 @@ func TestNewHandlerFromConfig(t *testing.T) {
 		handler, err := vital.NewHandlerFromConfig(cfg)
 
 		// then: it should return an error
-		if err == nil {
-			t.Error("expected error for invalid log level")
-		}
+		testastic.Error(t, err)
 
-		if handler != nil {
-			t.Error("expected nil handler when error occurs")
-		}
+		testastic.Nil(t, handler)
 	})
 
 	t.Run("creates handler with JSON format", func(t *testing.T) {
@@ -753,14 +632,10 @@ func TestNewHandlerFromConfig(t *testing.T) {
 		// when: creating a handler from config
 		handler, err := vital.NewHandlerFromConfig(cfg)
 		// then: it should succeed and create a ContextHandler
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		testastic.NoError(t, err)
 
 		_, ok := handler.(*vital.ContextHandler)
-		if !ok {
-			t.Error("expected handler to be a ContextHandler")
-		}
+		testastic.True(t, ok)
 	})
 
 	t.Run("creates handler with text format", func(t *testing.T) {
@@ -775,14 +650,10 @@ func TestNewHandlerFromConfig(t *testing.T) {
 		// when: creating a handler from config
 		handler, err := vital.NewHandlerFromConfig(cfg)
 		// then: it should succeed and create a ContextHandler
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		testastic.NoError(t, err)
 
 		_, ok := handler.(*vital.ContextHandler)
-		if !ok {
-			t.Error("expected handler to be a ContextHandler")
-		}
+		testastic.True(t, ok)
 	})
 
 	t.Run("returns error with invalid format", func(t *testing.T) {
@@ -798,13 +669,9 @@ func TestNewHandlerFromConfig(t *testing.T) {
 		handler, err := vital.NewHandlerFromConfig(cfg)
 
 		// then: it should return an error
-		if err == nil {
-			t.Error("expected error for invalid format")
-		}
+		testastic.Error(t, err)
 
-		if handler != nil {
-			t.Error("expected nil handler when error occurs")
-		}
+		testastic.Nil(t, handler)
 	})
 
 	t.Run("creates handler with AddSource enabled", func(t *testing.T) {
@@ -820,14 +687,10 @@ func TestNewHandlerFromConfig(t *testing.T) {
 		// when: creating a handler from config
 		handler, err := vital.NewHandlerFromConfig(cfg)
 		// then: it should succeed and create a valid handler
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		testastic.NoError(t, err)
 
 		_, ok := handler.(*vital.ContextHandler)
-		if !ok {
-			t.Error("expected handler to be a ContextHandler")
-		}
+		testastic.True(t, ok)
 	})
 
 	t.Run("creates handler with context handler options", func(t *testing.T) {
@@ -844,9 +707,7 @@ func TestNewHandlerFromConfig(t *testing.T) {
 		// when: creating a handler with custom options
 		handler, err := vital.NewHandlerFromConfig(cfg, vital.WithContextKeys(testKey))
 		// then: it should succeed and include the custom context keys
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		testastic.NoError(t, err)
 
 		contextHandler, ok := handler.(*vital.ContextHandler)
 		if !ok {
@@ -865,9 +726,7 @@ func TestNewHandlerFromConfig(t *testing.T) {
 			}
 		}
 
-		if !found {
-			t.Error("expected custom_key to be registered")
-		}
+		testastic.True(t, found)
 	})
 
 	t.Run("creates handler with builtin keys option", func(t *testing.T) {
@@ -882,14 +741,10 @@ func TestNewHandlerFromConfig(t *testing.T) {
 		// when: creating a handler with builtin keys
 		handler, err := vital.NewHandlerFromConfig(cfg, vital.WithBuiltinKeys())
 		// then: it should succeed and have builtin keys enabled
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		testastic.NoError(t, err)
 
 		_, ok := handler.(*vital.ContextHandler)
-		if !ok {
-			t.Fatal("expected handler to be a ContextHandler")
-		}
+		testastic.True(t, ok)
 	})
 }
 
@@ -919,12 +774,7 @@ func BenchmarkContextHandlerHandle(b *testing.B) {
 	handler := vital.NewContextHandler(baseHandler, vital.WithBuiltinKeys())
 	logger := slog.New(handler)
 
-	spanExporter := tracetest.NewInMemoryExporter()
-	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(spanExporter))
-	tracer := tp.Tracer("bench")
-
-	ctx, span := tracer.Start(context.Background(), "bench-span")
-	defer span.End()
+	ctx, _ := testSpanContext(b)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -933,4 +783,32 @@ func BenchmarkContextHandlerHandle(b *testing.B) {
 		buf.Reset()
 		logger.InfoContext(ctx, "benchmark")
 	}
+}
+
+// ExampleNewContextHandler demonstrates logging registered context values.
+func ExampleNewContextHandler() {
+	requestIDKey := vital.ContextKey{Name: "request_id"}
+
+	handler := vital.NewContextHandler(
+		slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+				if a.Key == slog.TimeKey {
+					return slog.Attr{}
+				}
+
+				return a
+			},
+		}),
+		vital.WithContextKeys(requestIDKey),
+	)
+
+	logger := slog.New(handler)
+	ctx := context.WithValue(context.Background(), requestIDKey, "abc-123")
+	logger.InfoContext(ctx, "handling request")
+
+	fmt.Println("logged with request_id from context")
+
+	// Output:
+	// level=INFO msg="handling request" request_id=abc-123
+	// logged with request_id from context
 }

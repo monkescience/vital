@@ -9,6 +9,10 @@
 
 # Build
 bin/
+dist/
+
+# CI caches
+.go/
 
 # Test coverage
 coverage/

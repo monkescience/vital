@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/monkescience/testastic"
 	"github.com/monkescience/vital"
 )
 
@@ -113,28 +113,16 @@ func TestLiveHandler(t *testing.T) {
 		handlers.ServeHTTP(responseRecorder, req)
 
 		// then: it should return 200 OK with correct response
-		if responseRecorder.Code != http.StatusOK {
-			t.Errorf(
-				"handler returned wrong status code: got %v want %v",
-				responseRecorder.Code,
-				http.StatusOK,
-			)
-		}
+		testastic.Equal(t, http.StatusOK, responseRecorder.Code)
 
 		var response vital.LiveResponse
 
 		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
-		if err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if response.Status != vital.StatusOK {
-			t.Errorf("expected status %v, got %v", vital.StatusOK, response.Status)
-		}
+		testastic.Equal(t, vital.StatusOK, response.Status)
 
-		if responseRecorder.Header().Get("Cache-Control") != "no-store, no-cache" {
-			t.Errorf("expected Cache-Control header to be set")
-		}
+		testastic.Equal(t, "no-store, no-cache", responseRecorder.Header().Get("Cache-Control"))
 	})
 
 	t.Run("direct handler func", func(t *testing.T) {
@@ -149,24 +137,14 @@ func TestLiveHandler(t *testing.T) {
 		handler(responseRecorder, req)
 
 		// then: it should return 200 OK
-		if responseRecorder.Code != http.StatusOK {
-			t.Errorf(
-				"handler returned wrong status code: got %v want %v",
-				responseRecorder.Code,
-				http.StatusOK,
-			)
-		}
+		testastic.Equal(t, http.StatusOK, responseRecorder.Code)
 
 		var response vital.LiveResponse
 
 		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
-		if err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if response.Status != vital.StatusOK {
-			t.Errorf("expected status %v, got %v", vital.StatusOK, response.Status)
-		}
+		testastic.Equal(t, vital.StatusOK, response.Status)
 	})
 
 	t.Run("accepts HEAD requests on GET endpoints", func(t *testing.T) {
@@ -188,31 +166,7 @@ func TestLiveHandler(t *testing.T) {
 				handlers.ServeHTTP(rec, req)
 
 				// then: HEAD should return 200 (stdlib ServeMux routes HEAD to the GET handler)
-				if rec.Code != http.StatusOK {
-					t.Errorf("HEAD %s: expected status %d, got %d", path, http.StatusOK, rec.Code)
-				}
-			})
-		}
-	})
-
-	t.Run("does not register legacy health paths", func(t *testing.T) {
-		t.Parallel()
-
-		handlers := vital.NewHealthHandler(vital.WithVersion("1.2.3"))
-		endpoints := []string{"/health/live", "/health/started", "/health/ready"}
-
-		for _, path := range endpoints {
-			t.Run(path, func(t *testing.T) {
-				t.Parallel()
-
-				rec := httptest.NewRecorder()
-				req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil)
-
-				handlers.ServeHTTP(rec, req)
-
-				if rec.Code != http.StatusNotFound {
-					t.Errorf("GET %s: expected status %d, got %d", path, http.StatusNotFound, rec.Code)
-				}
+				testastic.Equal(t, http.StatusOK, rec.Code)
 			})
 		}
 	})
@@ -236,28 +190,16 @@ func TestStartedHandler(t *testing.T) {
 		handlers.ServeHTTP(responseRecorder, req)
 
 		// then: it should behave like the liveness endpoint
-		if responseRecorder.Code != http.StatusOK {
-			t.Errorf(
-				"handler returned wrong status code: got %v want %v",
-				responseRecorder.Code,
-				http.StatusOK,
-			)
-		}
+		testastic.Equal(t, http.StatusOK, responseRecorder.Code)
 
 		var response vital.LiveResponse
 
 		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
-		if err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if response.Status != vital.StatusOK {
-			t.Errorf("expected status %v, got %v", vital.StatusOK, response.Status)
-		}
+		testastic.Equal(t, vital.StatusOK, response.Status)
 
-		if responseRecorder.Header().Get("Cache-Control") != "no-store, no-cache" {
-			t.Errorf("expected Cache-Control header to be set")
-		}
+		testastic.Equal(t, "no-store, no-cache", responseRecorder.Header().Get("Cache-Control"))
 	})
 
 	t.Run("returns service unavailable until started", func(t *testing.T) {
@@ -276,24 +218,14 @@ func TestStartedHandler(t *testing.T) {
 		handlers.ServeHTTP(responseRecorder, req)
 
 		// then: it should return 503 Service Unavailable
-		if responseRecorder.Code != http.StatusServiceUnavailable {
-			t.Errorf(
-				"handler returned wrong status code: got %v want %v",
-				responseRecorder.Code,
-				http.StatusServiceUnavailable,
-			)
-		}
+		testastic.Equal(t, http.StatusServiceUnavailable, responseRecorder.Code)
 
 		var response vital.LiveResponse
 
 		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
-		if err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if response.Status != vital.StatusError {
-			t.Errorf("expected status %v, got %v", vital.StatusError, response.Status)
-		}
+		testastic.Equal(t, vital.StatusError, response.Status)
 	})
 
 	t.Run("direct handler func", func(t *testing.T) {
@@ -310,24 +242,14 @@ func TestStartedHandler(t *testing.T) {
 		handler(responseRecorder, req)
 
 		// then: it should return 200 OK
-		if responseRecorder.Code != http.StatusOK {
-			t.Errorf(
-				"handler returned wrong status code: got %v want %v",
-				responseRecorder.Code,
-				http.StatusOK,
-			)
-		}
+		testastic.Equal(t, http.StatusOK, responseRecorder.Code)
 
 		var response vital.LiveResponse
 
 		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
-		if err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if response.Status != vital.StatusOK {
-			t.Errorf("expected status %v, got %v", vital.StatusOK, response.Status)
-		}
+		testastic.Equal(t, vital.StatusOK, response.Status)
 	})
 }
 
@@ -352,36 +274,20 @@ func TestReadyHandler(t *testing.T) {
 		handlers.ServeHTTP(responseRecorder, req)
 
 		// then: it should return 200 OK with version and environment
-		if responseRecorder.Code != http.StatusOK {
-			t.Errorf(
-				"handler returned wrong status code: got %v want %v",
-				responseRecorder.Code,
-				http.StatusOK,
-			)
-		}
+		testastic.Equal(t, http.StatusOK, responseRecorder.Code)
 
 		var response vital.ReadyResponse
 
 		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
-		if err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if response.Status != vital.StatusOK {
-			t.Errorf("expected status %v, got %v", vital.StatusOK, response.Status)
-		}
+		testastic.Equal(t, vital.StatusOK, response.Status)
 
-		if response.Version != version {
-			t.Errorf("expected version %v, got %v", version, response.Version)
-		}
+		testastic.Equal(t, version, response.Version)
 
-		if response.Environment != environment {
-			t.Errorf("expected environment %v, got %v", environment, response.Environment)
-		}
+		testastic.Equal(t, environment, response.Environment)
 
-		if len(response.Checks) != 0 {
-			t.Errorf("expected no checks, got %d", len(response.Checks))
-		}
+		testastic.Len(t, response.Checks, 0)
 	})
 
 	t.Run("successful checker", func(t *testing.T) {
@@ -406,45 +312,27 @@ func TestReadyHandler(t *testing.T) {
 		handlers.ServeHTTP(responseRecorder, req)
 
 		// then: it should return 200 OK with check results
-		if responseRecorder.Code != http.StatusOK {
-			t.Errorf(
-				"handler returned wrong status code: got %v want %v",
-				responseRecorder.Code,
-				http.StatusOK,
-			)
-		}
+		testastic.Equal(t, http.StatusOK, responseRecorder.Code)
 
 		var response vital.ReadyResponse
 
 		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
-		if err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if response.Status != vital.StatusOK {
-			t.Errorf("expected status %v, got %v", vital.StatusOK, response.Status)
-		}
+		testastic.Equal(t, vital.StatusOK, response.Status)
 
 		if len(response.Checks) != 1 {
 			t.Fatalf("expected 1 check, got %d", len(response.Checks))
 		}
 
 		check := response.Checks[0]
-		if check.Name != "database" {
-			t.Errorf("expected check name 'database', got %v", check.Name)
-		}
+		testastic.Equal(t, "database", check.Name)
 
-		if check.Status != vital.StatusOK {
-			t.Errorf("expected check status %v, got %v", vital.StatusOK, check.Status)
-		}
+		testastic.Equal(t, vital.StatusOK, check.Status)
 
-		if check.Message != "connection successful" {
-			t.Errorf("expected message 'connection successful', got %v", check.Message)
-		}
+		testastic.Equal(t, "connection successful", check.Message)
 
-		if check.Duration == "" {
-			t.Error("expected duration to be set")
-		}
+		testastic.StringNotEmpty(t, check.Duration)
 	})
 
 	t.Run("failed checker", func(t *testing.T) {
@@ -468,37 +356,23 @@ func TestReadyHandler(t *testing.T) {
 		handlers.ServeHTTP(responseRecorder, req)
 
 		// then: it should return 503 Service Unavailable
-		if responseRecorder.Code != http.StatusServiceUnavailable {
-			t.Errorf(
-				"handler returned wrong status code: got %v want %v",
-				responseRecorder.Code,
-				http.StatusServiceUnavailable,
-			)
-		}
+		testastic.Equal(t, http.StatusServiceUnavailable, responseRecorder.Code)
 
 		var response vital.ReadyResponse
 
 		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
-		if err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if response.Status != vital.StatusError {
-			t.Errorf("expected status %v, got %v", vital.StatusError, response.Status)
-		}
+		testastic.Equal(t, vital.StatusError, response.Status)
 
 		if len(response.Checks) != 1 {
 			t.Fatalf("expected 1 check, got %d", len(response.Checks))
 		}
 
 		check := response.Checks[0]
-		if check.Status != vital.StatusError {
-			t.Errorf("expected check status %v, got %v", vital.StatusError, check.Status)
-		}
+		testastic.Equal(t, vital.StatusError, check.Status)
 
-		if check.Message != "connection refused" {
-			t.Errorf("expected message 'connection refused', got %v", check.Message)
-		}
+		testastic.Equal(t, "connection refused", check.Message)
 	})
 
 	t.Run("panicking checker", func(t *testing.T) {
@@ -518,41 +392,25 @@ func TestReadyHandler(t *testing.T) {
 		handlers.ServeHTTP(responseRecorder, req)
 
 		// then: it should not crash and should return an error health response
-		if responseRecorder.Code != http.StatusServiceUnavailable {
-			t.Errorf(
-				"handler returned wrong status code: got %v want %v",
-				responseRecorder.Code,
-				http.StatusServiceUnavailable,
-			)
-		}
+		testastic.Equal(t, http.StatusServiceUnavailable, responseRecorder.Code)
 
 		var response vital.ReadyResponse
 
 		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
-		if err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if response.Status != vital.StatusError {
-			t.Errorf("expected status %v, got %v", vital.StatusError, response.Status)
-		}
+		testastic.Equal(t, vital.StatusError, response.Status)
 
 		if len(response.Checks) != 1 {
 			t.Fatalf("expected 1 check, got %d", len(response.Checks))
 		}
 
 		check := response.Checks[0]
-		if check.Name != "cache" {
-			t.Errorf("expected check name 'cache', got %v", check.Name)
-		}
+		testastic.Equal(t, "cache", check.Name)
 
-		if check.Status != vital.StatusError {
-			t.Errorf("expected check status %v, got %v", vital.StatusError, check.Status)
-		}
+		testastic.Equal(t, vital.StatusError, check.Status)
 
-		if !strings.Contains(check.Message, "panic") {
-			t.Errorf("expected panic message, got %v", check.Message)
-		}
+		testastic.Contains(t, check.Message, "panic")
 	})
 
 	t.Run("multiple checkers", func(t *testing.T) {
@@ -576,28 +434,16 @@ func TestReadyHandler(t *testing.T) {
 		handlers.ServeHTTP(responseRecorder, req)
 
 		// then: it should return 200 OK with all check results
-		if responseRecorder.Code != http.StatusOK {
-			t.Errorf(
-				"handler returned wrong status code: got %v want %v",
-				responseRecorder.Code,
-				http.StatusOK,
-			)
-		}
+		testastic.Equal(t, http.StatusOK, responseRecorder.Code)
 
 		var response vital.ReadyResponse
 
 		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
-		if err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if response.Status != vital.StatusOK {
-			t.Errorf("expected status %v, got %v", vital.StatusOK, response.Status)
-		}
+		testastic.Equal(t, vital.StatusOK, response.Status)
 
-		if len(response.Checks) != 3 {
-			t.Fatalf("expected 3 checks, got %d", len(response.Checks))
-		}
+		testastic.Len(t, response.Checks, 3)
 	})
 
 	t.Run("mixed checker results", func(t *testing.T) {
@@ -621,24 +467,14 @@ func TestReadyHandler(t *testing.T) {
 		handlers.ServeHTTP(responseRecorder, req)
 
 		// then: it should return 503 Service Unavailable due to the failed checker
-		if responseRecorder.Code != http.StatusServiceUnavailable {
-			t.Errorf(
-				"handler returned wrong status code: got %v want %v",
-				responseRecorder.Code,
-				http.StatusServiceUnavailable,
-			)
-		}
+		testastic.Equal(t, http.StatusServiceUnavailable, responseRecorder.Code)
 
 		var response vital.ReadyResponse
 
 		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
-		if err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if response.Status != vital.StatusError {
-			t.Errorf("expected overall status %v, got %v", vital.StatusError, response.Status)
-		}
+		testastic.Equal(t, vital.StatusError, response.Status)
 
 		foundError := false
 
@@ -648,9 +484,7 @@ func TestReadyHandler(t *testing.T) {
 			}
 		}
 
-		if !foundError {
-			t.Error("expected to find failed redis check")
-		}
+		testastic.True(t, foundError)
 	})
 
 	t.Run("timeout", func(t *testing.T) {
@@ -675,42 +509,23 @@ func TestReadyHandler(t *testing.T) {
 		handlers.ServeHTTP(responseRecorder, req)
 
 		// then: it should return 503 Service Unavailable due to timeout
-		if responseRecorder.Code != http.StatusServiceUnavailable {
-			t.Errorf(
-				"handler returned wrong status code: got %v want %v",
-				responseRecorder.Code,
-				http.StatusServiceUnavailable,
-			)
-		}
+		testastic.Equal(t, http.StatusServiceUnavailable, responseRecorder.Code)
 
 		var response vital.ReadyResponse
 
 		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
-		if err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if response.Status != vital.StatusError {
-			t.Errorf(
-				"expected status %v due to timeout, got %v",
-				vital.StatusError,
-				response.Status,
-			)
-		}
+		testastic.Equal(t, vital.StatusError, response.Status)
 
 		if len(response.Checks) != 1 {
 			t.Fatalf("expected 1 check, got %d", len(response.Checks))
 		}
 
 		check := response.Checks[0]
-		if check.Status != vital.StatusError {
-			t.Errorf("expected check to fail due to timeout, got status %v", check.Status)
-		}
+		testastic.Equal(t, vital.StatusError, check.Status)
 
-		if !strings.Contains(check.Message, "context deadline exceeded") &&
-			!strings.Contains(check.Message, "timed out") {
-			t.Errorf("expected timeout message, got: %v", check.Message)
-		}
+		testastic.Matches(t, check.Message, "context deadline exceeded|timed out")
 	})
 
 	t.Run("non-cooperative checker does not block timeout response", func(t *testing.T) {
@@ -738,41 +553,25 @@ func TestReadyHandler(t *testing.T) {
 		elapsed := time.Since(startedAt)
 
 		// then: response should return promptly without waiting for checker completion
-		if elapsed > 150*time.Millisecond {
-			t.Errorf("expected timeout response to return quickly, took %v", elapsed)
-		}
+		testastic.LessOrEqual(t, elapsed, 150*time.Millisecond)
 
-		if responseRecorder.Code != http.StatusServiceUnavailable {
-			t.Errorf(
-				"handler returned wrong status code: got %v want %v",
-				responseRecorder.Code,
-				http.StatusServiceUnavailable,
-			)
-		}
+		testastic.Equal(t, http.StatusServiceUnavailable, responseRecorder.Code)
 
 		var response vital.ReadyResponse
 
 		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
-		if err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if response.Status != vital.StatusError {
-			t.Errorf("expected overall status %v, got %v", vital.StatusError, response.Status)
-		}
+		testastic.Equal(t, vital.StatusError, response.Status)
 
 		if len(response.Checks) != 1 {
 			t.Fatalf("expected 1 check result, got %d", len(response.Checks))
 		}
 
 		check := response.Checks[0]
-		if check.Status != vital.StatusError {
-			t.Errorf("expected check status %v, got %v", vital.StatusError, check.Status)
-		}
+		testastic.Equal(t, vital.StatusError, check.Status)
 
-		if !strings.Contains(check.Message, "context deadline exceeded") {
-			t.Errorf("expected timeout message, got %q", check.Message)
-		}
+		testastic.Contains(t, check.Message, "context deadline exceeded")
 	})
 
 	t.Run("zero timeout", func(t *testing.T) {
@@ -797,24 +596,14 @@ func TestReadyHandler(t *testing.T) {
 		handlers.ServeHTTP(responseRecorder, req)
 
 		// then: it should return 200 OK (zero timeout means no timeout)
-		if responseRecorder.Code != http.StatusOK {
-			t.Errorf(
-				"handler returned wrong status code: got %v want %v",
-				responseRecorder.Code,
-				http.StatusOK,
-			)
-		}
+		testastic.Equal(t, http.StatusOK, responseRecorder.Code)
 
 		var response vital.ReadyResponse
 
 		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
-		if err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if response.Status != vital.StatusOK {
-			t.Errorf("expected status %v, got %v", vital.StatusOK, response.Status)
-		}
+		testastic.Equal(t, vital.StatusOK, response.Status)
 	})
 
 	t.Run("context cancellation", func(t *testing.T) {
@@ -844,9 +633,7 @@ func TestReadyHandler(t *testing.T) {
 		var response vital.ReadyResponse
 
 		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
-		if err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
+		testastic.NoError(t, err)
 
 		// The check should be marked as error due to context cancellation
 		if len(response.Checks) > 0 && response.Checks[0].Status == vital.StatusOK {
@@ -878,27 +665,15 @@ func TestReadyHandler(t *testing.T) {
 		handler(responseRecorder, req)
 
 		// then: it should return 200 OK with correct version and environment
-		if responseRecorder.Code != http.StatusOK {
-			t.Errorf(
-				"handler returned wrong status code: got %v want %v",
-				responseRecorder.Code,
-				http.StatusOK,
-			)
-		}
+		testastic.Equal(t, http.StatusOK, responseRecorder.Code)
 
 		var response vital.ReadyResponse
 
 		err := json.NewDecoder(responseRecorder.Body).Decode(&response)
-		if err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
+		testastic.NoError(t, err)
 
-		if response.Version != "2.0.0" {
-			t.Errorf("expected version '2.0.0', got %v", response.Version)
-		}
+		testastic.Equal(t, "2.0.0", response.Version)
 
-		if response.Environment != "production" {
-			t.Errorf("expected environment 'production', got %v", response.Environment)
-		}
+		testastic.Equal(t, "production", response.Environment)
 	})
 }

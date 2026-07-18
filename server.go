@@ -138,6 +138,10 @@ func WithLogger(logger *slog.Logger) ServerOption {
 }
 
 // NewServer creates a new Server with the provided handler and options.
+//
+// Defaults: ReadTimeout 30s, ReadHeaderTimeout 10s, WriteTimeout 10s,
+// IdleTimeout 120s, graceful shutdown timeout 20s. Each can be overridden
+// with the corresponding ServerOption.
 func NewServer(handler http.Handler, opts ...ServerOption) *Server {
 	defaultLogger := slog.Default()
 
@@ -167,12 +171,12 @@ func NewServer(handler http.Handler, opts ...ServerOption) *Server {
 }
 
 // Validate checks whether the server has enough configuration to start safely.
-func (server *Server) Validate() error {
-	if server.Addr == "" {
+func (s *Server) Validate() error {
+	if s.Addr == "" {
 		return ErrServerAddrRequired
 	}
 
-	if server.useTLS && (server.certificatePath == "" || server.keyPath == "") {
+	if s.useTLS && (s.certificatePath == "" || s.keyPath == "") {
 		return ErrIncompleteTLSConfig
 	}
 
@@ -180,19 +184,19 @@ func (server *Server) Validate() error {
 }
 
 // Run starts the server and blocks until a termination signal is received.
-func (server *Server) Run() error {
+func (s *Server) Run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	return server.RunContext(ctx)
+	return s.RunContext(ctx)
 }
 
 // RunContext starts the server and blocks until the context is canceled or the server fails.
-func (server *Server) RunContext(ctx context.Context) error {
+func (s *Server) RunContext(ctx context.Context) error {
 	serverErrors := make(chan error, defaultErrorBuffer)
 
 	go func() {
-		err := server.Start()
+		err := s.Start()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErrors <- err
 		}
@@ -200,7 +204,7 @@ func (server *Server) RunContext(ctx context.Context) error {
 
 	select {
 	case err := <-serverErrors:
-		hooksErr := server.runShutdownFuncsWithTimeout(ctx)
+		hooksErr := s.runShutdownFuncsWithTimeout(ctx)
 
 		return joinErrors(
 			wrapIfError(err, "server error"),
@@ -208,11 +212,11 @@ func (server *Server) RunContext(ctx context.Context) error {
 		)
 
 	case <-ctx.Done():
-		server.logger.Info("received shutdown signal")
+		s.logger.InfoContext(ctx, "received shutdown signal")
 
-		err := server.StopContext(ctx)
+		err := s.StopContext(ctx)
 		if err == nil {
-			server.logger.Info("server stopped gracefully")
+			s.logger.InfoContext(ctx, "server stopped gracefully")
 		}
 
 		return err
@@ -221,26 +225,26 @@ func (server *Server) RunContext(ctx context.Context) error {
 
 // Start begins listening and serving HTTP or HTTPS requests.
 // It blocks until the server stops or encounters an error.
-func (server *Server) Start() error {
-	validateErr := server.Validate()
+func (s *Server) Start() error {
+	validateErr := s.Validate()
 	if validateErr != nil {
 		return fmt.Errorf("validate server config: %w", validateErr)
 	}
 
-	server.logger.Info(
+	s.logger.Info(
 		"starting server",
-		slog.String("addr", server.Addr),
-		slog.Bool("tls", server.useTLS),
+		slog.String("addr", s.Addr),
+		slog.Bool("tls", s.useTLS),
 	)
 
 	var err error
-	if server.useTLS {
-		err = server.ListenAndServeTLS(server.certificatePath, server.keyPath)
+	if s.useTLS {
+		err = s.ListenAndServeTLS(s.certificatePath, s.keyPath)
 		if err != nil {
 			return fmt.Errorf("failed to start TLS server: %w", err)
 		}
 	} else {
-		err = server.ListenAndServe()
+		err = s.ListenAndServe()
 		if err != nil {
 			return fmt.Errorf("failed to start HTTP server: %w", err)
 		}
@@ -250,22 +254,23 @@ func (server *Server) Start() error {
 }
 
 // Stop gracefully shuts down the server with the configured shutdown timeout.
-func (server *Server) Stop() error {
-	return server.StopContext(context.Background())
+func (s *Server) Stop() error {
+	return s.StopContext(context.Background())
 }
 
 // StopContext gracefully shuts down the server with the configured shutdown timeout.
-func (server *Server) StopContext(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(withoutCancelOrBackground(ctx), server.shutdownTimeout)
+func (s *Server) StopContext(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(withoutCancelOrBackground(ctx), s.shutdownTimeout)
 	defer cancel()
 
-	server.logger.Info(
+	s.logger.InfoContext(
+		ctx,
 		"stopping server",
-		slog.String("timeout", server.shutdownTimeout.String()),
+		slog.String("timeout", s.shutdownTimeout.String()),
 	)
 
-	shutdownErr := server.Shutdown(ctx)
-	hooksErr := server.runShutdownFuncsWithTimeout(ctx)
+	shutdownErr := s.Shutdown(ctx)
+	hooksErr := s.runShutdownFuncsWithTimeout(ctx)
 
 	return joinErrors(
 		wrapIfError(shutdownErr, "shutdown failed"),
@@ -273,27 +278,27 @@ func (server *Server) StopContext(ctx context.Context) error {
 	)
 }
 
-func (server *Server) runShutdownFuncsWithTimeout(ctx context.Context) error {
-	if server.shutdownHooksTimeout > 0 {
+func (s *Server) runShutdownFuncsWithTimeout(ctx context.Context) error {
+	if s.shutdownHooksTimeout > 0 {
 		var cancel context.CancelFunc
 
-		ctx, cancel = context.WithTimeout(withoutCancelOrBackground(ctx), server.shutdownHooksTimeout)
+		ctx, cancel = context.WithTimeout(withoutCancelOrBackground(ctx), s.shutdownHooksTimeout)
 		defer cancel()
 	} else if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
 
-		ctx, cancel = context.WithTimeout(withoutCancelOrBackground(ctx), server.shutdownTimeout)
+		ctx, cancel = context.WithTimeout(withoutCancelOrBackground(ctx), s.shutdownTimeout)
 		defer cancel()
 	}
 
-	return server.runShutdownFuncs(ctx)
+	return s.runShutdownFuncs(ctx)
 }
 
-func (server *Server) runShutdownFuncs(ctx context.Context) error {
-	server.shutdownOnce.Do(func() {
+func (s *Server) runShutdownFuncs(ctx context.Context) error {
+	s.shutdownOnce.Do(func() {
 		var runErr error
 
-		for idx, shutdownFunc := range slices.Backward(server.shutdownFuncs) {
+		for idx, shutdownFunc := range slices.Backward(s.shutdownFuncs) {
 			func(hookIndex int) {
 				defer func() {
 					if recovered := recover(); recovered != nil {
@@ -309,10 +314,10 @@ func (server *Server) runShutdownFuncs(ctx context.Context) error {
 			}(idx)
 		}
 
-		server.shutdownErr = runErr
+		s.shutdownErr = runErr
 	})
 
-	return server.shutdownErr
+	return s.shutdownErr
 }
 
 func wrapIfError(err error, message string) error {

@@ -85,6 +85,8 @@ func runCheck(ctx context.Context, chk Checker) CheckResponse {
 type ReadyOption func(*readyConfig)
 
 // WithOverallReadyTimeout sets the maximum time allowed for all readiness checks to complete.
+// The default is 2 seconds. A value less than or equal to zero disables the
+// overall timeout and checks run bounded only by the request context.
 func WithOverallReadyTimeout(d time.Duration) ReadyOption {
 	return func(c *readyConfig) { c.overallTimeout = d }
 }

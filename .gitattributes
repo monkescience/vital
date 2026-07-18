@@ -1,12 +1,5 @@
-* text=auto
+* text=auto eol=lf
 
 *.go text diff=golang
 *.md text diff=markdown
-
-*.yaml text eol=lf
-*.yml text eol=lf
-*.toml text eol=lf
-*.json text eol=lf
-*.sh text eol=lf
-Dockerfile* text eol=lf
-Makefile text eol=lf
+*.sh text diff=bash

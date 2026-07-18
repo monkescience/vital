@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/monkescience/testastic"
 	"github.com/monkescience/vital"
 )
 
@@ -30,9 +31,7 @@ func TestNewServer(t *testing.T) {
 		server := vital.NewServer(handler)
 
 		// then: it should have the handler set
-		if server.Handler == nil {
-			t.Error("expected handler to be set")
-		}
+		testastic.NotNil(t, server.Handler)
 	})
 
 	t.Run("uses default timeouts", func(t *testing.T) {
@@ -47,21 +46,13 @@ func TestNewServer(t *testing.T) {
 		server := vital.NewServer(handler)
 
 		// then: it should use the documented default timeout values
-		if server.ReadTimeout != 30*time.Second {
-			t.Errorf("expected ReadTimeout %v, got %v", 30*time.Second, server.ReadTimeout)
-		}
+		testastic.Equal(t, 30*time.Second, server.ReadTimeout)
 
-		if server.ReadHeaderTimeout != 10*time.Second {
-			t.Errorf("expected ReadHeaderTimeout %v, got %v", 10*time.Second, server.ReadHeaderTimeout)
-		}
+		testastic.Equal(t, 10*time.Second, server.ReadHeaderTimeout)
 
-		if server.WriteTimeout != 10*time.Second {
-			t.Errorf("expected WriteTimeout %v, got %v", 10*time.Second, server.WriteTimeout)
-		}
+		testastic.Equal(t, 10*time.Second, server.WriteTimeout)
 
-		if server.IdleTimeout != 120*time.Second {
-			t.Errorf("expected IdleTimeout %v, got %v", 120*time.Second, server.IdleTimeout)
-		}
+		testastic.Equal(t, 120*time.Second, server.IdleTimeout)
 	})
 
 	t.Run("configures port correctly", func(t *testing.T) {
@@ -78,9 +69,7 @@ func TestNewServer(t *testing.T) {
 
 		// then: it should set the address
 		expectedAddr := fmt.Sprintf(":%d", expectedPort)
-		if server.Addr != expectedAddr {
-			t.Errorf("expected address %s, got %s", expectedAddr, server.Addr)
-		}
+		testastic.Equal(t, expectedAddr, server.Addr)
 	})
 
 	t.Run("configures custom timeouts", func(t *testing.T) {
@@ -105,21 +94,13 @@ func TestNewServer(t *testing.T) {
 		)
 
 		// then: it should use the custom timeout values (accessible via embedded http.Server)
-		if server.ReadTimeout != customRead {
-			t.Errorf("expected ReadTimeout %v, got %v", customRead, server.ReadTimeout)
-		}
+		testastic.Equal(t, customRead, server.ReadTimeout)
 
-		if server.ReadHeaderTimeout != customReadHeader {
-			t.Errorf("expected ReadHeaderTimeout %v, got %v", customReadHeader, server.ReadHeaderTimeout)
-		}
+		testastic.Equal(t, customReadHeader, server.ReadHeaderTimeout)
 
-		if server.WriteTimeout != customWrite {
-			t.Errorf("expected WriteTimeout %v, got %v", customWrite, server.WriteTimeout)
-		}
+		testastic.Equal(t, customWrite, server.WriteTimeout)
 
-		if server.IdleTimeout != customIdle {
-			t.Errorf("expected IdleTimeout %v, got %v", customIdle, server.IdleTimeout)
-		}
+		testastic.Equal(t, customIdle, server.IdleTimeout)
 	})
 
 	t.Run("configures custom logger", func(t *testing.T) {
@@ -135,9 +116,7 @@ func TestNewServer(t *testing.T) {
 		server := vital.NewServer(handler, vital.WithLogger(customLogger))
 
 		// then: it should configure ErrorLog (accessible via embedded http.Server)
-		if server.ErrorLog == nil {
-			t.Error("expected ErrorLog to be configured")
-		}
+		testastic.NotNil(t, server.ErrorLog)
 	})
 
 	t.Run("applies multiple options", func(t *testing.T) {
@@ -158,9 +137,7 @@ func TestNewServer(t *testing.T) {
 
 		// then: port option should be applied
 		expectedAddr := fmt.Sprintf(":%d", port)
-		if server.Addr != expectedAddr {
-			t.Errorf("expected address %s, got %s", expectedAddr, server.Addr)
-		}
+		testastic.Equal(t, expectedAddr, server.Addr)
 	})
 }
 
@@ -180,9 +157,7 @@ func TestServer_Validate(t *testing.T) {
 		err := server.Start()
 
 		// then: validation should fail early
-		if !errors.Is(err, vital.ErrServerAddrRequired) {
-			t.Fatalf("expected ErrServerAddrRequired, got %v", err)
-		}
+		testastic.ErrorIs(t, err, vital.ErrServerAddrRequired)
 	})
 
 	t.Run("requires both TLS files", func(t *testing.T) {
@@ -203,9 +178,7 @@ func TestServer_Validate(t *testing.T) {
 		err := server.Validate()
 
 		// then: it should fail before trying to listen
-		if !errors.Is(err, vital.ErrIncompleteTLSConfig) {
-			t.Fatalf("expected ErrIncompleteTLSConfig, got %v", err)
-		}
+		testastic.ErrorIs(t, err, vital.ErrIncompleteTLSConfig)
 	})
 }
 
@@ -266,18 +239,11 @@ func TestServer_HTTP(t *testing.T) {
 
 		defer func() { _ = resp.Body.Close() }()
 
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("expected status %d, got %d", http.StatusOK, resp.StatusCode)
-		}
+		testastic.Equal(t, http.StatusOK, resp.StatusCode)
 
 		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			t.Fatalf("failed to read response body: %v", err)
-		}
-
-		if string(body) != responseBody {
-			t.Errorf("expected body %q, got %q", responseBody, string(body))
-		}
+		testastic.NoError(t, err)
+		testastic.Equal(t, responseBody, string(body))
 
 		select {
 		case err := <-serverErrors:
@@ -316,9 +282,7 @@ func TestServer_Stop(t *testing.T) {
 		// when: stopping the server
 		err := server.Stop()
 		// then: it should shut down without error
-		if err != nil {
-			t.Errorf("expected no error during shutdown, got: %v", err)
-		}
+		testastic.NoError(t, err)
 	})
 
 	t.Run("runs shutdown funcs in reverse order", func(t *testing.T) {
@@ -377,24 +341,13 @@ func TestServer_Stop(t *testing.T) {
 		// when: stopping the server
 		err := server.Stop()
 		// then: it should run all hooks once with the shutdown timeout context
-		if err != nil {
-			t.Fatalf("expected no error during shutdown, got: %v", err)
-		}
-
-		if !sawDeadline.Load() {
-			t.Error("expected shutdown hooks to receive a context with deadline")
-		}
+		testastic.NoError(t, err)
+		testastic.True(t, sawDeadline.Load())
 
 		mu.Lock()
 		defer mu.Unlock()
 
-		if len(calls) != 2 {
-			t.Fatalf("expected 2 shutdown hook calls, got %d", len(calls))
-		}
-
-		if calls[0] != "second" || calls[1] != "first" {
-			t.Errorf("expected shutdown hooks in reverse order, got %v", calls)
-		}
+		testastic.SliceEqual(t, []string{"second", "first"}, calls)
 	})
 
 	t.Run("returns shutdown hook errors", func(t *testing.T) {
@@ -427,9 +380,7 @@ func TestServer_Stop(t *testing.T) {
 		err := server.Stop()
 
 		// then: the hook error should be returned to the caller
-		if !errors.Is(err, hookErr) {
-			t.Fatalf("expected hook error, got %v", err)
-		}
+		testastic.ErrorIs(t, err, hookErr)
 	})
 
 	t.Run("repeat stop calls replay hook errors", func(t *testing.T) {
@@ -467,17 +418,11 @@ func TestServer_Stop(t *testing.T) {
 		secondErr := server.Stop()
 
 		// then: both calls should return the original hook error, and the hook should run only once
-		if !errors.Is(firstErr, hookErr) {
-			t.Fatalf("expected first Stop to return hook error, got %v", firstErr)
-		}
+		testastic.ErrorIs(t, firstErr, hookErr)
 
-		if !errors.Is(secondErr, hookErr) {
-			t.Fatalf("expected second Stop to replay hook error, got %v", secondErr)
-		}
+		testastic.ErrorIs(t, secondErr, hookErr)
 
-		if calls.Load() != 1 {
-			t.Errorf("expected shutdown hook to run exactly once, got %d", calls.Load())
-		}
+		testastic.Equal(t, int32(1), calls.Load())
 	})
 
 	t.Run("runs hooks with a fresh timeout budget", func(t *testing.T) {
@@ -516,9 +461,7 @@ func TestServer_Stop(t *testing.T) {
 
 				hookDeadline = time.Until(deadline)
 
-				if ctx.Err() != nil {
-					t.Errorf("expected fresh hook context, got %v", ctx.Err())
-				}
+				testastic.NoError(t, ctx.Err())
 
 				return nil
 			}),
@@ -554,13 +497,9 @@ func TestServer_Stop(t *testing.T) {
 		close(releaseRequest)
 
 		// then: shutdown should time out, but hooks should still get their own budget
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("expected shutdown timeout, got %v", err)
-		}
+		testastic.ErrorIs(t, err, context.DeadlineExceeded)
 
-		if hookDeadline < 150*time.Millisecond {
-			t.Fatalf("expected fresh hook timeout budget, got %v", hookDeadline)
-		}
+		testastic.GreaterOrEqual(t, hookDeadline, 150*time.Millisecond)
 	})
 
 	t.Run("hooks share remaining shutdown budget by default", func(t *testing.T) {
@@ -626,13 +565,9 @@ func TestServer_Stop(t *testing.T) {
 
 		// then: shutdown should time out, and hooks should also see expired context
 		// since they share the remaining budget (which is zero after HTTP shutdown timed out)
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("expected shutdown timeout, got %v", err)
-		}
+		testastic.ErrorIs(t, err, context.DeadlineExceeded)
 
-		if !errors.Is(hookCtxErr, context.DeadlineExceeded) {
-			t.Fatalf("expected hook context to be expired (shared budget), got %v", hookCtxErr)
-		}
+		testastic.ErrorIs(t, hookCtxErr, context.DeadlineExceeded)
 	})
 
 	t.Run("respects shutdown timeout", func(t *testing.T) {
@@ -671,9 +606,7 @@ func TestServer_Stop(t *testing.T) {
 
 		// then: it should respect the shutdown timeout
 		// Allow some margin for timing variance
-		if elapsed > shortTimeout+500*time.Millisecond {
-			t.Errorf("shutdown took too long: %v (expected around %v)", elapsed, shortTimeout)
-		}
+		testastic.LessOrEqual(t, elapsed, shortTimeout+500*time.Millisecond)
 	})
 }
 
@@ -693,9 +626,7 @@ func TestServer_Run(t *testing.T) {
 		err := server.Run()
 
 		// then: the startup error should be returned to the caller
-		if !errors.Is(err, vital.ErrServerAddrRequired) {
-			t.Fatalf("expected ErrServerAddrRequired, got %v", err)
-		}
+		testastic.ErrorIs(t, err, vital.ErrServerAddrRequired)
 	})
 
 	t.Run("stops gracefully when context is canceled", func(t *testing.T) {
@@ -731,9 +662,7 @@ func TestServer_Run(t *testing.T) {
 		// then: the server should stop without error
 		select {
 		case err := <-runErr:
-			if err != nil {
-				t.Fatalf("expected graceful shutdown, got %v", err)
-			}
+			testastic.NoError(t, err)
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for RunContext to return")
 		}
@@ -741,11 +670,15 @@ func TestServer_Run(t *testing.T) {
 }
 
 func TestServerIntegration_HTTP(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
 
 	t.Run("full HTTP server lifecycle", func(t *testing.T) {
+		t.Parallel()
+
 		// given: an HTTP server with a test endpoint
 		testPath := "/test"
 		testResponse := "integration test"
@@ -796,31 +729,27 @@ func TestServerIntegration_HTTP(t *testing.T) {
 			}
 
 			// then: all requests should succeed
-			if resp.StatusCode != http.StatusOK {
-				_ = resp.Body.Close()
-				t.Errorf("request %d: expected status %d, got %d", i, http.StatusOK, resp.StatusCode)
-			}
+			testastic.Equal(t, http.StatusOK, resp.StatusCode)
 
 			body, err := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
 
-			if err != nil {
-				t.Fatalf("failed to read response body: %v", err)
-			}
-
-			if string(body) != testResponse {
-				t.Errorf("request %d: expected body %q, got %q", i, testResponse, string(body))
-			}
+			testastic.NoError(t, err)
+			testastic.Equal(t, testResponse, string(body))
 		}
 	})
 }
 
 func TestServerIntegration_HTTPS(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
 
 	t.Run("full HTTPS server lifecycle", func(t *testing.T) {
+		t.Parallel()
+
 		// given: an HTTPS server with a test endpoint
 		testPath := "/secure"
 		testResponse := "secure response"
@@ -831,7 +760,7 @@ func TestServerIntegration_HTTPS(t *testing.T) {
 			_, _ = w.Write([]byte(testResponse))
 		})
 
-		port := getAvailablePort(t) + 1 // Offset by 1 to avoid conflicts with HTTP test
+		port := getAvailablePort(t)
 		server := vital.NewServer(
 			mux,
 			vital.WithPort(port),
@@ -880,23 +809,14 @@ func TestServerIntegration_HTTPS(t *testing.T) {
 		defer func() { _ = resp.Body.Close() }()
 
 		// then: the HTTPS request should succeed
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("expected status %d, got %d", http.StatusOK, resp.StatusCode)
-		}
+		testastic.Equal(t, http.StatusOK, resp.StatusCode)
 
 		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			t.Fatalf("failed to read response body: %v", err)
-		}
-
-		if string(body) != testResponse {
-			t.Errorf("expected body %q, got %q", testResponse, string(body))
-		}
+		testastic.NoError(t, err)
+		testastic.Equal(t, testResponse, string(body))
 
 		// Verify TLS was actually used
-		if resp.TLS == nil {
-			t.Error("expected TLS connection, got plain HTTP")
-		}
+		testastic.NotNil(t, resp.TLS)
 	})
 }
 
