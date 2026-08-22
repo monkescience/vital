@@ -26,9 +26,10 @@ jobs:
         id: generate-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
-          app-id: ${{ vars.YEET_APP_ID }}
+          client-id: ${{ vars.YEET_APP_CLIENT_ID }}
           private-key: ${{ secrets.YEET_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
 
       - name: Run yeet
         uses: docker://ghcr.io/monkescience/yeet:v0.14.9@sha256:b4174615f70468bfc76805ef1cfb4ef1d626c607d8d9ba0c9140d3b0c42b8746
