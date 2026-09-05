@@ -165,19 +165,20 @@ mux.HandleFunc("GET /startupz", vital.StartedHandlerFunc(startedFunc))
 
 ### Startup Probe
 
-Provide a startup function when your service has a warm-up phase:
+Provide a startup function when your service has a warm-up phase. Use
+`sync/atomic` to share startup state safely with concurrent probe requests:
 
 ```go
-started := false
+var started atomic.Bool
 
 healthHandler := vital.NewHealthHandler(
 	vital.WithStartedFunc(func() bool {
-		return started
+		return started.Load()
 	}),
 )
 
 // Later, once initialization is complete:
-started = true
+started.Store(true)
 ```
 
 `/startupz` returns `503 Service Unavailable` until the function returns `true`.
