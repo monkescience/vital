@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.7.2](https://github.com/monkescience/vital/compare/v0.7.1...v0.7.2) (2026-09-05)
+
+### Bug Fixes
+
+- **deps:** update module go.opentelemetry.io/otel/trace to v1.46.0 (#76) ([8726dde](https://github.com/monkescience/vital/commit/8726ddeac2e3bfa2df5f54fae5b09bb81f4cdf51))
+- **server:** preserve cleanup context after startup failure ([3c5bc6e](https://github.com/monkescience/vital/commit/3c5bc6e0134173f8c673ae6b9393234bdc7dbb81))
+- **ci:** restrict manual releases to main ([6139acb](https://github.com/monkescience/vital/commit/6139acba9013e89dbb33b7b0b5bf07c13d25f547))
+- **ci:** scope Renovate token to the current repository ([471cd4b](https://github.com/monkescience/vital/commit/471cd4b89d63f4a10bf8527933619360285bd9e8))
+- **server:** finish RunContext after an external stop ([05fab41](https://github.com/monkescience/vital/commit/05fab417f9a815872b873386892cfb89c8c664d6))
+- **server:** bound shutdown hook waits and report expiration ([8a52ea3](https://github.com/monkescience/vital/commit/8a52ea3cd7e37b4c20d4a45adeed5fad1248d886))
+- **server:** honor caller shutdown deadlines and cancellation ([f10f8a7](https://github.com/monkescience/vital/commit/f10f8a76e3dfa1cf3b70122f3e7e6f7d4c4a530b))
+- **deps:** update module github.com/monkescience/testastic to v0.4.5 (#75) ([2b41934](https://github.com/monkescience/vital/commit/2b41934dabcdbb1b1a9d94dcd712f4aaa230f719))
+
 ## [v0.7.1](https://github.com/monkescience/vital/compare/v0.7.0...v0.7.1) (2026-08-22)
 
 ### Bug Fixes
