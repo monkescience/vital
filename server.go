@@ -214,7 +214,7 @@ func (s *Server) RunContext(ctx context.Context) error {
 	case <-ctx.Done():
 		s.logger.InfoContext(ctx, "received shutdown signal")
 
-		err := s.StopContext(ctx)
+		err := s.StopContext(context.WithoutCancel(ctx))
 		if err == nil {
 			s.logger.InfoContext(ctx, "server stopped gracefully")
 		}
@@ -260,16 +260,22 @@ func (s *Server) Stop() error {
 
 // StopContext gracefully shuts down the server with the configured shutdown timeout.
 func (s *Server) StopContext(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(withoutCancelOrBackground(ctx), s.shutdownTimeout)
+	ctx = contextOrBackground(ctx)
+
+	shutdownCtx, cancel := context.WithTimeout(ctx, s.shutdownTimeout)
 	defer cancel()
 
 	s.logger.InfoContext(
-		ctx,
+		shutdownCtx,
 		"stopping server",
 		slog.String("timeout", s.shutdownTimeout.String()),
 	)
 
-	shutdownErr := s.Shutdown(ctx)
+	shutdownErr := s.Shutdown(shutdownCtx)
+	if s.shutdownHooksTimeout <= 0 {
+		ctx = shutdownCtx
+	}
+
 	hooksErr := s.runShutdownFuncsWithTimeout(ctx)
 
 	return joinErrors(
@@ -282,12 +288,12 @@ func (s *Server) runShutdownFuncsWithTimeout(ctx context.Context) error {
 	if s.shutdownHooksTimeout > 0 {
 		var cancel context.CancelFunc
 
-		ctx, cancel = context.WithTimeout(withoutCancelOrBackground(ctx), s.shutdownHooksTimeout)
+		ctx, cancel = context.WithTimeout(ctx, s.shutdownHooksTimeout)
 		defer cancel()
 	} else if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
 
-		ctx, cancel = context.WithTimeout(withoutCancelOrBackground(ctx), s.shutdownTimeout)
+		ctx, cancel = context.WithTimeout(ctx, s.shutdownTimeout)
 		defer cancel()
 	}
 
@@ -342,10 +348,10 @@ func joinErrors(errs ...error) error {
 	return joined
 }
 
-func withoutCancelOrBackground(ctx context.Context) context.Context {
+func contextOrBackground(ctx context.Context) context.Context {
 	if ctx == nil {
 		return context.Background()
 	}
 
-	return context.WithoutCancel(ctx)
+	return ctx
 }

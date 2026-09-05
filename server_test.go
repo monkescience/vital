@@ -900,3 +900,60 @@ func waitForServer(t *testing.T, url string) {
 
 	t.Fatalf("server did not become ready at %s", url)
 }
+
+func TestServerStopContextCallerBudget(t *testing.T) {
+	t.Parallel()
+
+	for _, hooksTimeout := range []time.Duration{0, time.Minute} {
+		t.Run(hooksTimeout.String(), func(t *testing.T) {
+			t.Parallel()
+
+			// given: a caller deadline shorter than either configured shutdown budget
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+
+			deadline, _ := ctx.Deadline()
+			server := vital.NewServer(http.NewServeMux(),
+				vital.WithLogger(slog.New(slog.DiscardHandler)),
+				vital.WithShutdownHooksTimeout(hooksTimeout),
+				vital.WithShutdownFunc(func(hookCtx context.Context) error {
+					hookDeadline, _ := hookCtx.Deadline()
+					testastic.Equal(t, deadline, hookDeadline)
+
+					return nil
+				}),
+			)
+
+			// when: shutdown uses the caller context
+			err := server.StopContext(ctx)
+
+			// then: shutdown succeeds and the hook receives the caller deadline
+			testastic.NoError(t, err)
+		})
+	}
+}
+
+func TestServerStopContextCallerCancellation(t *testing.T) {
+	t.Parallel()
+
+	// given: a canceled caller context and a hook that reports cancellation
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	observed := make(chan error, 1)
+	server := vital.NewServer(http.NewServeMux(),
+		vital.WithLogger(slog.New(slog.DiscardHandler)),
+		vital.WithShutdownFunc(func(hookCtx context.Context) error {
+			observed <- hookCtx.Err()
+
+			return hookCtx.Err()
+		}),
+	)
+
+	// when: shutdown uses the canceled context
+	err := server.StopContext(ctx)
+
+	// then: both shutdown and the hook report caller cancellation
+	testastic.ErrorIs(t, err, context.Canceled)
+	testastic.ErrorIs(t, <-observed, context.Canceled)
+}
