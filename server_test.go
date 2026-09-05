@@ -1069,3 +1069,73 @@ func TestServerShutdownHooksExpiredSuccess(t *testing.T) {
 	// then: the original expiration remains observable
 	testastic.ErrorIs(t, err, context.DeadlineExceeded)
 }
+
+func TestServerRunContextExternalStop(t *testing.T) {
+	t.Parallel()
+
+	// given: a running server whose cleanup blocks before returning an error
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	hookStarted := make(chan struct{})
+	releaseHook := make(chan struct{})
+
+	var releaseOnce sync.Once
+
+	release := func() { releaseOnce.Do(func() { close(releaseHook) }) }
+	defer release()
+
+	hookErr := errors.New("cleanup failed")
+	port := getAvailablePort(t)
+	server := vital.NewServer(http.NewServeMux(),
+		vital.WithPort(port),
+		vital.WithLogger(slog.New(slog.DiscardHandler)),
+		vital.WithShutdownFunc(func(context.Context) error {
+			close(hookStarted)
+			<-releaseHook
+
+			return hookErr
+		}),
+	)
+
+	runDone := make(chan error, 1)
+	go func() { runDone <- server.RunContext(ctx) }()
+
+	waitForServer(t, fmt.Sprintf("http://localhost:%d", port))
+
+	// when: another caller stops the server
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- server.Stop() }()
+
+	<-hookStarted
+
+	// then: RunContext waits for cleanup to finish
+	runReturned := false
+
+	select {
+	case <-runDone:
+		runReturned = true
+	default:
+	}
+
+	testastic.False(t, runReturned)
+
+	if runReturned {
+		return
+	}
+
+	// when: cleanup is allowed to finish
+	release()
+
+	// then: both callers receive the cleanup error and RunContext returns
+	testastic.ErrorIs(t, <-stopDone, hookErr)
+
+	select {
+	case err := <-runDone:
+		testastic.ErrorIs(t, err, hookErr)
+	case <-time.After(time.Second):
+		testastic.NoError(t, errors.New("RunContext did not return after external Stop completed"))
+
+		return
+	}
+}

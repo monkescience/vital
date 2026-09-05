@@ -200,14 +200,15 @@ func (s *Server) RunContext(ctx context.Context) error {
 	serverErrors := make(chan error, defaultErrorBuffer)
 
 	go func() {
-		err := s.Start()
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			serverErrors <- err
-		}
+		serverErrors <- s.Start()
 	}()
 
 	select {
 	case err := <-serverErrors:
+		if errors.Is(err, http.ErrServerClosed) {
+			return s.StopContext(context.WithoutCancel(ctx))
+		}
+
 		hooksErr := s.runShutdownFuncsWithTimeout(ctx)
 
 		return joinErrors(
