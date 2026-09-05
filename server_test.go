@@ -567,7 +567,12 @@ func TestServer_Stop(t *testing.T) {
 		// since they share the remaining budget (which is zero after HTTP shutdown timed out)
 		testastic.ErrorIs(t, err, context.DeadlineExceeded)
 
-		testastic.ErrorIs(t, <-hookCtxErr, context.DeadlineExceeded)
+		select {
+		case err := <-hookCtxErr:
+			testastic.ErrorIs(t, err, context.DeadlineExceeded)
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for hook context")
+		}
 	})
 
 	t.Run("respects shutdown timeout", func(t *testing.T) {
@@ -612,6 +617,45 @@ func TestServer_Stop(t *testing.T) {
 
 func TestServer_Run(t *testing.T) {
 	t.Parallel()
+	t.Run("preserves cleanup context when caller cancels after startup failure", func(t *testing.T) {
+		t.Parallel()
+
+		// given: invalid startup configuration and a hook that cancels the caller context
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		observed := make(chan error, 1)
+		server := vital.NewServer(http.NewServeMux(),
+			vital.WithLogger(slog.New(slog.DiscardHandler)),
+			vital.WithShutdownFunc(func(hookCtx context.Context) error {
+				cancel()
+
+				observed <- hookCtx.Err()
+
+				return hookCtx.Err()
+			}),
+		)
+
+		// when: startup fails and cleanup runs
+		runDone := make(chan error, 1)
+		go func() { runDone <- server.RunContext(ctx) }()
+
+		// then: cleanup keeps a live context and RunContext returns the startup error
+		select {
+		case err := <-observed:
+			testastic.NoError(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for cleanup after startup failure")
+		}
+
+		select {
+		case err := <-runDone:
+			testastic.ErrorIs(t, err, vital.ErrServerAddrRequired)
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for RunContext after startup failure")
+		}
+	})
+
 	t.Run("returns startup errors instead of exiting", func(t *testing.T) {
 		t.Parallel()
 
@@ -955,7 +999,13 @@ func TestServerStopContextCallerCancellation(t *testing.T) {
 
 	// then: both shutdown and the hook report caller cancellation
 	testastic.ErrorIs(t, err, context.Canceled)
-	testastic.ErrorIs(t, <-observed, context.Canceled)
+
+	select {
+	case err := <-observed:
+		testastic.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for hook cancellation")
+	}
 }
 
 func TestServerShutdownHooksTimeout(t *testing.T) {
@@ -985,7 +1035,11 @@ func TestServerShutdownHooksTimeout(t *testing.T) {
 	stopped := make(chan error, 1)
 	go func() { stopped <- server.Stop() }()
 
-	<-started
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for hook to start")
+	}
 
 	// then: shutdown returns a deadline error without waiting for the hook
 	select {
@@ -1107,7 +1161,11 @@ func TestServerRunContextExternalStop(t *testing.T) {
 	stopDone := make(chan error, 1)
 	go func() { stopDone <- server.Stop() }()
 
-	<-hookStarted
+	select {
+	case <-hookStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for hook to start")
+	}
 
 	// then: RunContext waits for cleanup to finish
 	runReturned := false
@@ -1128,7 +1186,12 @@ func TestServerRunContextExternalStop(t *testing.T) {
 	release()
 
 	// then: both callers receive the cleanup error and RunContext returns
-	testastic.ErrorIs(t, <-stopDone, hookErr)
+	select {
+	case err := <-stopDone:
+		testastic.ErrorIs(t, err, hookErr)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for external Stop to return")
+	}
 
 	select {
 	case err := <-runDone:

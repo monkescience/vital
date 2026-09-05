@@ -195,7 +195,8 @@ func (s *Server) Run() error {
 	return s.RunContext(ctx)
 }
 
-// RunContext starts the server and blocks until the context is canceled or the server fails.
+// RunContext starts the server and blocks until the context is canceled, the server
+// fails, or the server is stopped externally.
 func (s *Server) RunContext(ctx context.Context) error {
 	serverErrors := make(chan error, defaultErrorBuffer)
 
@@ -209,7 +210,7 @@ func (s *Server) RunContext(ctx context.Context) error {
 			return s.StopContext(context.WithoutCancel(ctx))
 		}
 
-		hooksErr := s.runShutdownFuncsWithTimeout(ctx)
+		hooksErr := s.runShutdownFuncsWithTimeout(context.WithoutCancel(ctx))
 
 		return joinErrors(
 			wrapIfError(err, "server error"),
@@ -264,6 +265,7 @@ func (s *Server) Stop() error {
 }
 
 // StopContext gracefully shuts down the server with the configured shutdown timeout.
+// The caller context can shorten the deadline or cancel shutdown, including cleanup hooks.
 func (s *Server) StopContext(ctx context.Context) error {
 	ctx = contextOrBackground(ctx)
 
