@@ -521,14 +521,14 @@ func TestServer_Stop(t *testing.T) {
 
 		port := getAvailablePort(t)
 
-		var hookCtxErr error
+		hookCtxErr := make(chan error, 1)
 
 		server := vital.NewServer(
 			mux,
 			vital.WithPort(port),
 			vital.WithShutdownTimeout(50*time.Millisecond),
 			vital.WithShutdownFunc(func(ctx context.Context) error {
-				hookCtxErr = ctx.Err()
+				hookCtxErr <- ctx.Err()
 
 				return nil
 			}),
@@ -567,7 +567,7 @@ func TestServer_Stop(t *testing.T) {
 		// since they share the remaining budget (which is zero after HTTP shutdown timed out)
 		testastic.ErrorIs(t, err, context.DeadlineExceeded)
 
-		testastic.ErrorIs(t, hookCtxErr, context.DeadlineExceeded)
+		testastic.ErrorIs(t, <-hookCtxErr, context.DeadlineExceeded)
 	})
 
 	t.Run("respects shutdown timeout", func(t *testing.T) {
@@ -956,4 +956,116 @@ func TestServerStopContextCallerCancellation(t *testing.T) {
 	// then: both shutdown and the hook report caller cancellation
 	testastic.ErrorIs(t, err, context.Canceled)
 	testastic.ErrorIs(t, <-observed, context.Canceled)
+}
+
+func TestServerShutdownHooksTimeout(t *testing.T) {
+	t.Parallel()
+
+	// given: a hook that blocks beyond its timeout and ignores cancellation
+	release := make(chan struct{})
+	defer close(release)
+
+	started := make(chan struct{})
+
+	var calls atomic.Int32
+
+	server := vital.NewServer(http.NewServeMux(),
+		vital.WithLogger(slog.New(slog.DiscardHandler)),
+		vital.WithShutdownHooksTimeout(10*time.Millisecond),
+		vital.WithShutdownFunc(func(context.Context) error {
+			calls.Add(1)
+			close(started)
+			<-release
+
+			return nil
+		}),
+	)
+
+	// when: shutdown starts the blocking hook
+	stopped := make(chan error, 1)
+	go func() { stopped <- server.Stop() }()
+
+	<-started
+
+	// then: shutdown returns a deadline error without waiting for the hook
+	select {
+	case err := <-stopped:
+		testastic.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(time.Second):
+		testastic.NoError(t, errors.New("shutdown did not return when the hook budget expired"))
+
+		return
+	}
+
+	// when: shutdown is requested again while the hook is still blocked
+	go func() { stopped <- server.Stop() }()
+
+	// then: the repeated call is bounded and the hook runs only once
+	select {
+	case err := <-stopped:
+		testastic.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(time.Second):
+		testastic.NoError(t, errors.New("repeated shutdown waited indefinitely for the same hook"))
+
+		return
+	}
+
+	testastic.Equal(t, int32(1), calls.Load())
+}
+
+func TestServerShutdownPreservesCompletedHookErrors(t *testing.T) {
+	t.Parallel()
+
+	// given: a failing hook followed by a hook that blocks beyond its deadline
+	hookErr := errors.New("flush failed")
+
+	release := make(chan struct{})
+	defer close(release)
+
+	server := vital.NewServer(http.NewServeMux(),
+		vital.WithLogger(slog.New(slog.DiscardHandler)),
+		vital.WithShutdownHooksTimeout(20*time.Millisecond),
+		vital.WithShutdownFunc(func(context.Context) error {
+			<-release
+
+			return nil
+		}),
+		vital.WithShutdownFunc(func(context.Context) error {
+			return hookErr
+		}),
+	)
+
+	// when: shutdown reaches the deadline while the second hook is still blocked
+	err := server.Stop()
+
+	// then: the first call preserves both the completed failure and the timeout
+	testastic.ErrorIs(t, err, hookErr)
+	testastic.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestServerShutdownHooksExpiredSuccess(t *testing.T) {
+	t.Parallel()
+
+	// given: a hook that returns nil only after its deadline expires
+	server := vital.NewServer(http.NewServeMux(),
+		vital.WithLogger(slog.New(slog.DiscardHandler)),
+		vital.WithShutdownHooksTimeout(10*time.Millisecond),
+		vital.WithShutdownFunc(func(ctx context.Context) error {
+			<-ctx.Done()
+
+			return nil
+		}),
+	)
+
+	// when: shutdown waits for the hook
+	err := server.Stop()
+
+	// then: expiration is reported even though the hook returns nil
+	testastic.ErrorIs(t, err, context.DeadlineExceeded)
+
+	// when: shutdown is requested again
+	err = server.Stop()
+
+	// then: the original expiration remains observable
+	testastic.ErrorIs(t, err, context.DeadlineExceeded)
 }

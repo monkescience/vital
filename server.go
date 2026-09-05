@@ -46,6 +46,8 @@ type Server struct {
 	shutdownFuncs        []ShutdownFunc
 	shutdownHooksTimeout time.Duration
 	shutdownOnce         sync.Once
+	shutdownDone         chan struct{}
+	shutdownErrMu        sync.Mutex
 	shutdownErr          error
 	logger               *slog.Logger
 }
@@ -77,6 +79,8 @@ func WithShutdownTimeout(timeout time.Duration) ServerOption {
 }
 
 // WithShutdownFunc registers a cleanup hook that runs during shutdown.
+// Hooks must honor context cancellation. A hook that ignores cancellation may
+// continue running after shutdown returns a timeout error.
 // A nil fn is silently ignored.
 func WithShutdownFunc(fn ShutdownFunc) ServerOption {
 	return func(s *Server) {
@@ -302,28 +306,55 @@ func (s *Server) runShutdownFuncsWithTimeout(ctx context.Context) error {
 
 func (s *Server) runShutdownFuncs(ctx context.Context) error {
 	s.shutdownOnce.Do(func() {
-		var runErr error
-
-		for idx, shutdownFunc := range slices.Backward(s.shutdownFuncs) {
-			func(hookIndex int) {
-				defer func() {
-					if recovered := recover(); recovered != nil {
-						panicErr := fmt.Errorf("%w: hook %d: %v", ErrShutdownHookPanic, hookIndex, recovered)
-						runErr = errors.Join(runErr, panicErr)
-					}
-				}()
-
-				err := shutdownFunc(ctx)
-				if err != nil {
-					runErr = errors.Join(runErr, fmt.Errorf("shutdown hook %d: %w", hookIndex, err))
-				}
-			}(idx)
-		}
-
-		s.shutdownErr = runErr
+		s.shutdownDone = make(chan struct{})
+		go s.executeShutdownFuncs(ctx)
 	})
 
-	return s.shutdownErr
+	select {
+	case <-s.shutdownDone:
+		return s.shutdownErr
+	default:
+	}
+
+	select {
+	case <-s.shutdownDone:
+		return s.shutdownErr
+	case <-ctx.Done():
+		s.shutdownErrMu.Lock()
+		defer s.shutdownErrMu.Unlock()
+
+		return errors.Join(s.shutdownErr, fmt.Errorf("shutdown hooks: %w", ctx.Err()))
+	}
+}
+
+func (s *Server) executeShutdownFuncs(ctx context.Context) {
+	defer close(s.shutdownDone)
+
+	var runErr error
+
+	for idx, shutdownFunc := range slices.Backward(s.shutdownFuncs) {
+		func(hookIndex int) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					panicErr := fmt.Errorf("%w: hook %d: %v", ErrShutdownHookPanic, hookIndex, recovered)
+					runErr = errors.Join(runErr, panicErr)
+				}
+			}()
+
+			err := shutdownFunc(ctx)
+			if err != nil {
+				runErr = errors.Join(runErr, fmt.Errorf("shutdown hook %d: %w", hookIndex, err))
+			}
+		}(idx)
+
+		s.shutdownErrMu.Lock()
+		s.shutdownErr = runErr
+		s.shutdownErrMu.Unlock()
+	}
+
+	s.shutdownErrMu.Lock()
+	s.shutdownErr = errors.Join(runErr, ctx.Err())
+	s.shutdownErrMu.Unlock()
 }
 
 func wrapIfError(err error, message string) error {
