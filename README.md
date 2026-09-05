@@ -379,12 +379,12 @@ func main() {
 		}
 
 		// Create user in database
-		_, err = db.ExecContext(r.Context(),
+		_, execErr := db.ExecContext(r.Context(),
 			"INSERT INTO users (name, email) VALUES ($1, $2)",
 			req.Name, req.Email,
 		)
-		if err != nil {
-			logger.ErrorContext(r.Context(), "failed to create user", slog.Any("error", err))
+		if execErr != nil {
+			logger.ErrorContext(r.Context(), "failed to create user", slog.Any("error", execErr))
 			http.Error(w, "failed to create user", http.StatusInternalServerError)
 			return
 		}
