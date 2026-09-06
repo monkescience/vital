@@ -48,10 +48,15 @@ func (r *Registry) Register(key ContextKey) {
 // The internal cache is invalidated when new keys are registered; callers
 // may freely mutate the returned slice without affecting future calls.
 func (r *Registry) Keys() []ContextKey {
+	return append([]ContextKey(nil), r.sharedKeys()...)
+}
+
+// Callers must treat the returned slice as read-only.
+func (r *Registry) sharedKeys() []ContextKey {
 	r.mutex.RLock()
 
 	if r.cached != nil {
-		keys := append([]ContextKey(nil), r.cached...)
+		keys := r.cached
 		r.mutex.RUnlock()
 
 		return keys
@@ -71,8 +76,12 @@ func (r *Registry) Keys() []ContextKey {
 		r.cached = cached
 	}
 
-	return append([]ContextKey(nil), r.cached...)
+	return r.cached
 }
+
+// inlineAttrCapacity holds the three builtin trace attributes plus a typical set of
+// registered keys without a heap allocation.
+const inlineAttrCapacity = 16
 
 // ContextHandler is a slog.Handler that automatically extracts registered context values
 // and adds them as log attributes.
@@ -150,22 +159,14 @@ func (h *ContextHandler) Enabled(ctx context.Context, level slog.Level) bool {
 
 // Handle processes the log record, extracting registered context values and adding them as attributes.
 func (h *ContextHandler) Handle(ctx context.Context, record slog.Record) error {
-	if h.builtinKeys {
-		if spanCtx := trace.SpanFromContext(ctx).SpanContext(); spanCtx.IsValid() {
-			record.AddAttrs(
-				slog.String("trace_id", spanCtx.TraceID().String()),
-				slog.String("span_id", spanCtx.SpanID().String()),
-				slog.String("trace_flags", spanCtx.TraceFlags().String()),
-			)
-		}
-	}
+	keys := h.registry.sharedKeys()
 
-	for _, key := range h.registry.Keys() {
-		if value := ctx.Value(key); value != nil {
-			record.AddAttrs(slog.Attr{
-				Key:   key.Name,
-				Value: slog.AnyValue(value),
-			})
+	if h.builtinKeys || len(keys) > 0 {
+		var storage [inlineAttrCapacity]slog.Attr
+
+		attrs := h.appendContextAttrs(ctx, storage[:0], keys)
+		if len(attrs) > 0 {
+			record.AddAttrs(attrs...)
 		}
 	}
 
@@ -209,6 +210,33 @@ func (h *ContextHandler) Registry() *Registry {
 // Unwrap returns the underlying handler wrapped by this ContextHandler.
 func (h *ContextHandler) Unwrap() slog.Handler {
 	return h.handler
+}
+
+func (h *ContextHandler) appendContextAttrs(
+	ctx context.Context,
+	attrs []slog.Attr,
+	keys []ContextKey,
+) []slog.Attr {
+	if h.builtinKeys {
+		if spanCtx := trace.SpanFromContext(ctx).SpanContext(); spanCtx.IsValid() {
+			attrs = append(attrs,
+				slog.String("trace_id", spanCtx.TraceID().String()),
+				slog.String("span_id", spanCtx.SpanID().String()),
+				slog.String("trace_flags", spanCtx.TraceFlags().String()),
+			)
+		}
+	}
+
+	for _, key := range keys {
+		if value := ctx.Value(key); value != nil {
+			attrs = append(attrs, slog.Attr{
+				Key:   key.Name,
+				Value: slog.AnyValue(value),
+			})
+		}
+	}
+
+	return attrs
 }
 
 var (

@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/monkescience/testastic"
@@ -748,40 +750,192 @@ func TestNewHandlerFromConfig(t *testing.T) {
 	})
 }
 
-func BenchmarkRegistryKeys(b *testing.B) {
+func TestRegistryConcurrentLogging(t *testing.T) {
+	t.Parallel()
+
+	// given: a handler sharing a registry with concurrent writers
 	registry := vital.NewRegistry()
+	//nolint:sloglint // Exercise enabled concurrent logging and JSON encoding.
+	logger := slog.New(vital.NewContextHandler(slog.NewJSONHandler(io.Discard, nil), vital.WithRegistry(registry)))
 
-	key1 := vital.ContextKey{Name: "key1"}
-	key2 := vital.ContextKey{Name: "key2"}
-	key3 := vital.ContextKey{Name: "key3"}
+	// when: workers register keys while logging through the shared snapshot
+	var workers sync.WaitGroup
+	for worker := range 8 {
+		workers.Go(func() {
+			for index := range 100 {
+				registry.Register(vital.ContextKey{Name: fmt.Sprintf("key_%d_%d", worker, index)})
+				logger.InfoContext(t.Context(), "concurrent")
+			}
+		})
+	}
 
-	registry.Register(key1)
-	registry.Register(key2)
-	registry.Register(key3)
+	workers.Wait()
 
-	b.ReportAllocs()
-	b.ResetTimer()
+	// then: every registered key survives without a race
+	testastic.Len(t, registry.Keys(), 800)
+}
 
-	for range b.N {
-		_ = registry.Keys()
+func TestContextHandlerBatchBoundaries(t *testing.T) {
+	t.Parallel()
+
+	for _, count := range []int{0, 3, 10, 13, 14, 32} {
+		for _, existing := range []int{0, 5, 10} {
+			t.Run(fmt.Sprintf("keys_%d_existing_%d", count, existing), func(t *testing.T) {
+				t.Parallel()
+
+				// given: a traced context with registered keys around the inline attribute capacity
+				var output bytes.Buffer
+
+				registry := vital.NewRegistry()
+				ctx, spanCtx := testSpanContext(t)
+
+				for index := range count {
+					key := vital.ContextKey{Name: fmt.Sprintf("key_%d", index)}
+					registry.Register(key)
+					ctx = context.WithValue(ctx, key, "value") //nolint:fatcontext // Build the registered context chain.
+				}
+
+				logger := slog.New(vital.NewContextHandler(
+					slog.NewJSONHandler(&output, nil),
+					vital.WithRegistry(registry),
+					vital.WithBuiltinKeys(),
+				))
+
+				attrs := make([]slog.Attr, existing)
+				for index := range existing {
+					attrs[index] = slog.String(fmt.Sprintf("existing_%d", index), "value")
+				}
+
+				// when: logging a record that already carries attributes
+				logger.LogAttrs(ctx, slog.LevelInfo, "message", attrs...)
+
+				// then: existing, trace, and context attributes are all emitted
+				var entry map[string]any
+
+				err := json.Unmarshal(output.Bytes(), &entry)
+				testastic.NoError(t, err)
+
+				for index := range count {
+					testastic.DeepEqual[any](t, "value", entry[fmt.Sprintf("key_%d", index)])
+				}
+
+				for index := range existing {
+					testastic.DeepEqual[any](t, "value", entry[fmt.Sprintf("existing_%d", index)])
+				}
+
+				testastic.DeepEqual[any](t, spanCtx.TraceID().String(), entry["trace_id"])
+				testastic.DeepEqual[any](t, spanCtx.SpanID().String(), entry["span_id"])
+				testastic.DeepEqual[any](t, spanCtx.TraceFlags().String(), entry["trace_flags"])
+			})
+		}
+	}
+}
+
+func BenchmarkRegistryKeys(b *testing.B) {
+	for _, count := range []int{0, 3, 10} {
+		b.Run(fmt.Sprintf("keys_%d", count), func(b *testing.B) {
+			registry := vital.NewRegistry()
+			for index := range count {
+				registry.Register(vital.ContextKey{Name: fmt.Sprintf("key_%d", index)})
+			}
+
+			_ = registry.Keys()
+
+			b.Run("sequential", func(b *testing.B) {
+				b.ReportAllocs()
+
+				for b.Loop() {
+					_ = registry.Keys()
+				}
+			})
+			b.Run("parallel", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						_ = registry.Keys()
+					}
+				})
+			})
+		})
 	}
 }
 
 func BenchmarkContextHandlerHandle(b *testing.B) {
-	var buf bytes.Buffer
+	for _, scenario := range []struct {
+		name     string
+		plain    bool
+		keys     int
+		missing  bool
+		builtin  bool
+		span     bool
+		existing int
+	}{
+		{name: "plain_slog", plain: true},
+		{name: "no_keys"},
+		{name: "three_keys", keys: 3},
+		{name: "ten_keys", keys: 10},
+		{name: "large_record", keys: 32},
+		{name: "existing_attrs", keys: 10, existing: 10},
+		{name: "plain_existing_attrs", plain: true, existing: 10},
+		{name: "missing_keys", keys: 3, missing: true},
+		{name: "trace_absent", builtin: true},
+		{name: "trace_present", builtin: true, span: true},
+		{name: "keys_and_trace", keys: 3, builtin: true, span: true},
+	} {
+		b.Run(scenario.name, func(b *testing.B) {
+			ctx := b.Context()
+			if scenario.span {
+				ctx, _ = testSpanContext(b)
+			}
 
-	baseHandler := slog.NewJSONHandler(&buf, nil)
-	handler := vital.NewContextHandler(baseHandler, vital.WithBuiltinKeys())
-	logger := slog.New(handler)
+			registry := vital.NewRegistry()
 
-	ctx, _ := testSpanContext(b)
+			for index := range scenario.keys {
+				key := vital.ContextKey{Name: fmt.Sprintf("key_%d", index)}
+				registry.Register(key)
 
-	b.ReportAllocs()
-	b.ResetTimer()
+				if !scenario.missing {
+					ctx = context.WithValue(ctx, key, "value") //nolint:fatcontext // Context setup is outside the timed loop.
+				}
+			}
 
-	for range b.N {
-		buf.Reset()
-		logger.InfoContext(ctx, "benchmark")
+			_ = registry.Keys()
+
+			//nolint:sloglint // Measure JSON encoding without output I/O, DiscardHandler would skip encoding.
+			var handler slog.Handler = slog.NewJSONHandler(io.Discard, nil)
+
+			if !scenario.plain {
+				opts := []vital.ContextHandlerOption{vital.WithRegistry(registry)}
+				if scenario.builtin {
+					opts = append(opts, vital.WithBuiltinKeys())
+				}
+
+				handler = vital.NewContextHandler(handler, opts...)
+			}
+
+			logger := slog.New(handler)
+
+			attrs := make([]slog.Attr, scenario.existing)
+			for index := range attrs {
+				attrs[index] = slog.String(fmt.Sprintf("existing_%d", index), "value")
+			}
+
+			b.Run("sequential", func(b *testing.B) {
+				b.ReportAllocs()
+
+				for b.Loop() {
+					logger.LogAttrs(ctx, slog.LevelInfo, "benchmark", attrs...)
+				}
+			})
+			b.Run("parallel", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						logger.LogAttrs(ctx, slog.LevelInfo, "benchmark", attrs...)
+					}
+				})
+			})
+		})
 	}
 }
 
