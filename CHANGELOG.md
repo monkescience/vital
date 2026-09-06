@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.7.3](https://github.com/monkescience/vital/compare/v0.7.2...v0.7.3) (2026-09-06)
+
+### Performance Improvements
+
+- **logger:** reduce context logging allocations ([7900b03](https://github.com/monkescience/vital/commit/7900b0399a850cd880ef8c93ece888a9edc92b27))
+
 ## [v0.7.2](https://github.com/monkescience/vital/compare/v0.7.1...v0.7.2) (2026-09-05)
 
 ### Bug Fixes
