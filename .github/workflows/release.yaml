@@ -33,7 +33,7 @@ jobs:
           repositories: ${{ github.event.repository.name }}
 
       - name: Run yeet
-        uses: docker://ghcr.io/monkescience/yeet:v0.14.11@sha256:23a4f2db1aed43a07bdc0e6009d0f836da8ff094e6501a6832b37eb67d56fa0d
+        uses: docker://ghcr.io/monkescience/yeet:v0.14.12@sha256:d3be385a13e047ca373eafdae7fe48de39e3753b4cffb73a97e6aa362b57d31f
         with:
           args: release
         env:
