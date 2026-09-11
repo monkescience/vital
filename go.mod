@@ -2,7 +2,7 @@ module github.com/monkescience/vital
 
 go 1.26.0
 
-toolchain go1.27.0
+toolchain go1.27.1
 
 require (
 	github.com/monkescience/testastic v0.4.5
