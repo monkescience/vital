@@ -5,7 +5,7 @@ go 1.26.0
 toolchain go1.27.1
 
 require (
-	github.com/monkescience/testastic v0.4.6
+	github.com/monkescience/testastic v0.4.7
 	go.opentelemetry.io/otel/trace v1.46.0
 )
 
