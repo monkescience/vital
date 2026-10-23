@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.7.4](https://github.com/monkescience/vital/compare/v0.7.3...v0.7.4) (2026-10-23)
+
+### Bug Fixes
+
+- **deps:** update module go.opentelemetry.io/otel/trace to v1.47.0 (#102) ([129a1ff](https://github.com/monkescience/vital/commit/129a1ff0399be4848eb3330ffd68ac9d98a75ed5))
+- **deps:** update module github.com/monkescience/testastic to v0.4.7 (#85) ([3f0b488](https://github.com/monkescience/vital/commit/3f0b488c6709ef64af45c0afcc224e5435ceea26))
+- **deps:** update module github.com/monkescience/testastic to v0.4.6 (#83) ([19426f2](https://github.com/monkescience/vital/commit/19426f2ac8fd9816520c80e9001e5d74d3e3abab))
+
 ## [v0.7.3](https://github.com/monkescience/vital/compare/v0.7.2...v0.7.3) (2026-09-06)
 
 ### Performance Improvements
