@@ -1,6 +1,6 @@
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 # renovate: datasource=go depName=github.com/vladopajic/go-test-coverage/v2
-GO_TEST_COVERAGE_VERSION := v2.20.1
+GO_TEST_COVERAGE_VERSION := v2.21.0
 COVERAGE_FLAGS ?=
 
 .PHONY: test bench lint fmt generate clean mod-tidy coverage check-coverage help
